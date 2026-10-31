@@ -6,6 +6,7 @@ import re
 import io
 import json
 from datetime import datetime, timezone
+import hashlib
 import webbrowser
 import threading
 import subprocess
@@ -347,12 +348,28 @@ async def analysis_draft(doi: str):
     if not record or record.get("status") != "DONE" or not record.get("draft"):
         return JSONResponse({"error": "No completed analysis draft is available."}, status_code=404)
     try:
-        record["draft"] = json.loads(record["draft"])
+        draft = json.loads(record["draft"])
     except (TypeError, ValueError):
         return JSONResponse({"error": "The saved analysis draft has an invalid format."}, status_code=500)
-    argumentation = await asyncio.to_thread(get_store().get_argumentation, normalized)
-    record["argumentation"] = argumentation
+    # The analysis draft also stores the full extracted document and a copy of
+    # the argumentation graph. The detail page only needs these display fields;
+    # send the graph through its own request so the overview can render first.
+    record["draft"] = {
+        "grobid": draft.get("grobid") or {},
+        "analysis": draft.get("analysis") or {},
+    }
     return {"analysis": record}
+
+
+@app.get("/api/analysis/argumentation/{doi:path}")
+async def analysis_argumentation(doi: str):
+    normalized = extract_doi(doi)
+    if not normalized:
+        return JSONResponse({"error": "Invalid DOI."}, status_code=400)
+    argumentation = await asyncio.to_thread(get_store().get_argumentation, normalized)
+    if not argumentation:
+        return JSONResponse({"error": "No structured argumentation is available for this paper."}, status_code=404)
+    return {"argumentation": argumentation}
 
 
 @app.post("/api/analysis/review/{doi:path}")
@@ -750,6 +767,7 @@ async def downloaded_papers_endpoint():
     import json
     store = get_store()
     records = await asyncio.to_thread(store.list, 2000)
+    analyses = {row["doi"]: row for row in await asyncio.to_thread(store.list_analyses)}
     downloaded = []
     for r in records:
         if r["status"] == "DOWNLOADED" and r.get("file_path"):
@@ -765,6 +783,7 @@ async def downloaded_papers_endpoint():
                     meta = json.loads(r.get("metadata") or "{}")
                 except Exception:
                     pass
+                analysis = analyses.get(r["doi"], {})
                 downloaded.append({
                     "doi": r["doi"],
                     "filename": r["filename"],
@@ -780,7 +799,8 @@ async def downloaded_papers_endpoint():
                     "resolved_url": r.get("resolved_url") or "",
                     "updated_at": r.get("updated_at") or "",
                     "last_uploaded_project": meta.get("last_uploaded_project") or "",
-                    "uploaded_at": meta.get("uploaded_at") or ""
+                    "uploaded_at": meta.get("uploaded_at") or "",
+                    "analysis_status": analysis.get("status", "NOT_STARTED")
                 })
     return {"papers": downloaded, "total": len(downloaded)}
 
@@ -1222,13 +1242,13 @@ async def download_ris_endpoint(filename: str = "slr_citations.ris"):
 @app.get("/api/slr/config")
 async def get_slr_config():
     settings.refresh_api_credentials()
-    key = settings.SLR_PUBLIC_API_KEY
+    key = settings.SLR_API_KEY
     masked_key = f"{key[:4]}...{key[-4:]}" if len(key) > 8 else ("***" if key else "")
     return {
         "base_url": settings.SLR_API_BASE_URL,
         "has_api_key": bool(key),
         "api_key_masked": masked_key,
-        "default_project_id": settings.SLR_DEFAULT_PROJECT_ID
+        "default_project_id": settings.SLR_DEFAULT_PROJECT_ID,
     }
 
 @app.post("/api/slr/config")
@@ -1245,7 +1265,9 @@ async def update_slr_config(request: Request):
     if base_url:
         settings.SLR_API_BASE_URL = base_url
     if "api_key" in data and api_key:
+        settings.SLR_API_KEY = api_key
         settings.SLR_PUBLIC_API_KEY = api_key
+        settings.SLR_REPOSITORY_API_KEY = api_key
     if "default_project_id" in data:
         settings.SLR_DEFAULT_PROJECT_ID = default_project_id
 
@@ -1260,22 +1282,32 @@ async def update_slr_config(request: Request):
         updated_keys = set()
         new_lines = []
         for line in env_lines:
-            if line.startswith("SLR_API_BASE_URL="):
+            if line.startswith("SLR_API_KEY="):
+                new_lines.append(f"SLR_API_KEY={settings.SLR_API_KEY}\n")
+                updated_keys.add("SLR_API_KEY")
+            elif line.startswith("SLR_API_BASE_URL="):
                 new_lines.append(f"SLR_API_BASE_URL={settings.SLR_API_BASE_URL}\n")
                 updated_keys.add("SLR_API_BASE_URL")
             elif line.startswith("SLR_PUBLIC_API_KEY="):
                 new_lines.append(f"SLR_PUBLIC_API_KEY={settings.SLR_PUBLIC_API_KEY}\n")
                 updated_keys.add("SLR_PUBLIC_API_KEY")
+            elif line.startswith("SLR_REPOSITORY_API_KEY="):
+                new_lines.append(f"SLR_REPOSITORY_API_KEY={settings.SLR_REPOSITORY_API_KEY}\n")
+                updated_keys.add("SLR_REPOSITORY_API_KEY")
             elif line.startswith("SLR_DEFAULT_PROJECT_ID="):
                 new_lines.append(f"SLR_DEFAULT_PROJECT_ID={settings.SLR_DEFAULT_PROJECT_ID}\n")
                 updated_keys.add("SLR_DEFAULT_PROJECT_ID")
             else:
                 new_lines.append(line)
         
+        if "SLR_API_KEY" not in updated_keys:
+            new_lines.append(f"SLR_API_KEY={settings.SLR_API_KEY}\n")
         if "SLR_API_BASE_URL" not in updated_keys:
             new_lines.append(f"SLR_API_BASE_URL={settings.SLR_API_BASE_URL}\n")
         if "SLR_PUBLIC_API_KEY" not in updated_keys:
             new_lines.append(f"SLR_PUBLIC_API_KEY={settings.SLR_PUBLIC_API_KEY}\n")
+        if "SLR_REPOSITORY_API_KEY" not in updated_keys:
+            new_lines.append(f"SLR_REPOSITORY_API_KEY={settings.SLR_REPOSITORY_API_KEY}\n")
         if "SLR_DEFAULT_PROJECT_ID" not in updated_keys:
             new_lines.append(f"SLR_DEFAULT_PROJECT_ID={settings.SLR_DEFAULT_PROJECT_ID}\n")
 
@@ -1289,20 +1321,20 @@ async def update_slr_config(request: Request):
         "message": "Đã lưu cấu hình kết nối SLR System thành công!",
         "config": {
             "base_url": settings.SLR_API_BASE_URL,
-            "has_api_key": bool(settings.SLR_PUBLIC_API_KEY),
-            "default_project_id": settings.SLR_DEFAULT_PROJECT_ID
-        }
+            "has_api_key": bool(settings.SLR_API_KEY),
+            "default_project_id": settings.SLR_DEFAULT_PROJECT_ID,
+            }
     }
 
 @app.get("/api/slr/projects")
 async def get_slr_projects():
     settings.refresh_api_credentials()
     base_url = settings.SLR_API_BASE_URL or "http://127.0.0.1:5000"
-    api_key = settings.SLR_PUBLIC_API_KEY
+    api_key = settings.SLR_API_KEY
     if not api_key:
         return JSONResponse({
             "success": False,
-            "error": "Chưa cấu hình API Key (SLR_PUBLIC_API_KEY). Vui lòng cấu hình trước."
+            "error": "Chưa cấu hình SLR API key. Vui lòng cấu hình trước."
         }, status_code=400)
 
     url = f"{base_url}/api/public/papers/projects"
@@ -1331,6 +1363,166 @@ async def get_slr_projects():
     except Exception as e:
         return JSONResponse({"success": False, "error": f"Lỗi kiểm tra dự án: {str(e)}"}, status_code=500)
 
+def _normalize_fetcher_draft(draft):
+    """Expose the legacy nested review result in the Repository API draft schema."""
+    if not isinstance(draft, dict) or not isinstance(draft.get("analysis"), dict):
+        return draft
+    outer_fields = {key: value for key, value in draft.items() if key != "analysis"}
+    return {**outer_fields, **draft["analysis"]}
+
+
+def _push_analysis_run_to_slr(store, doi, record, target_path, base_url, api_key, project_id):
+    """Upload a completed Fetcher run and its exact full-text mapping snapshot."""
+    from pathlib import Path
+
+    analysis_record = store.get_analysis(doi)
+    if not analysis_record or analysis_record.get("status") != "DONE" or not analysis_record.get("draft"):
+        return {"success": True, "status": "not_available"}
+    try:
+        draft = analysis_record["draft"]
+        if isinstance(draft, str):
+            draft = json.loads(draft)
+        draft = _normalize_fetcher_draft(draft)
+        argumentation = store.get_argumentation(doi)
+        if not isinstance(draft, dict) or not isinstance(argumentation, dict):
+            raise ValueError("Analysis payload is incomplete")
+        mapping_path = Path(target_path).with_suffix(".fulltext.json")
+        if not mapping_path.is_file():
+            raise FileNotFoundError(f"Missing full-text mapping: {mapping_path.name}")
+        analysis_payload = {"analysis": {**analysis_record, "draft": draft, "argumentation": argumentation}}
+        analysis_bytes = json.dumps(analysis_payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        mapping_bytes = mapping_path.read_bytes()
+        source_run_id = str(argumentation.get("id") or doi)
+        digest = hashlib.sha256(analysis_bytes + b"\0" + mapping_bytes).hexdigest()
+
+        metadata = record.get("metadata")
+        if isinstance(metadata, str):
+            metadata = json.loads(metadata) if metadata.strip() else {}
+        if not isinstance(metadata, dict):
+            metadata = {}
+        authors = metadata.get("authors")
+        if isinstance(authors, str):
+            authors = [{"name": name.strip()} for name in authors.replace(";", ",").split(",") if name.strip()]
+        elif isinstance(authors, list):
+            authors = [{"name": author} if isinstance(author, str) else author for author in authors]
+        try:
+            year = int(str(metadata.get("year"))[:4]) if metadata.get("year") else None
+        except (TypeError, ValueError):
+            year = None
+        metadata_payload = {
+            "title": metadata.get("title") or record.get("title") or doi,
+            "abstract": metadata.get("abstract"), "authors": authors, "year": year,
+            "journal": metadata.get("journal") or metadata.get("venue"),
+            "journalIssn": metadata.get("journalIssn") or metadata.get("issn"),
+            "volume": metadata.get("volume"), "issue": metadata.get("issue"),
+            "pages": metadata.get("pages"), "publicationDate": metadata.get("publicationDate"),
+            "publisher": metadata.get("publisher"), "language": metadata.get("language"),
+            "publicationType": metadata.get("publicationType"), "keywords": metadata.get("keywords"),
+            "openAlexId": metadata.get("openAlexId"), "externalIdentifiers": metadata.get("externalIdentifiers"),
+            "doi": doi, "sourceUrl": record.get("resolved_url") or metadata.get("sourceUrl") or metadata.get("url"),
+            "sourceProvider": record.get("source") or metadata.get("sourceProvider") or "SLR_PAPER_FETCHER",
+            "sourceId": source_run_id, "sourcePriority": 10,
+        }
+        response = requests.post(
+            f"{base_url}/api/public/projects/{project_id}/analysis-runs",
+            headers={"X-API-Key": api_key, "Idempotency-Key": f"paper-fetcher-{source_run_id[:80]}-{digest}"},
+            data={"doi": doi, "metadata": json.dumps(metadata_payload, ensure_ascii=False)},
+            files={
+                "analysis": ("analysis.json", analysis_bytes, "application/json"),
+                "fullTextMapping": (mapping_path.name, mapping_bytes, "application/json"),
+            },
+            timeout=180,
+        )
+        if response.status_code not in (200, 201):
+            try:
+                body = response.json()
+                message = body.get("message") or body.get("error", {}).get("message") or response.text
+            except Exception:
+                message = response.text
+            return {"success": False, "status": "failed", "message": f"Analysis sync HTTP {response.status_code}: {message}"}
+        return {"success": True, "status": "uploaded", "run_id": (response.json().get("data") or {}).get("runId")}
+    except Exception as exc:
+        return {"success": False, "status": "failed", "message": str(exc)}
+
+def _push_paper_to_repository(store, doi, record, target_path, base_url, api_key):
+    """Upload a PDF and, when available, its completed analysis to the shared Repository."""
+    from pathlib import Path
+    try:
+        raw = record.get("metadata")
+        meta = json.loads(raw) if isinstance(raw, str) and raw.strip() else raw
+        if not isinstance(meta, dict):
+            meta = {}
+        analysis = None
+        mapping = None
+        analysis_sync = {"status": "not_available"}
+        row = store.get_analysis(doi)
+        if row and row.get("status") == "DONE" and row.get("draft"):
+            try:
+                draft = row["draft"]
+                if isinstance(draft, str):
+                    draft = json.loads(draft)
+                draft = _normalize_fetcher_draft(draft)
+                argumentation = store.get_argumentation(doi)
+                mapping_path = Path(target_path).with_suffix(".fulltext.json")
+                if not isinstance(draft, dict) or not isinstance(argumentation, dict) or not mapping_path.is_file():
+                    raise ValueError("Completed analysis or full-text mapping is missing")
+                analysis = {"analysis": {**row, "draft": draft, "argumentation": argumentation}}
+                mapping = mapping_path.read_bytes()
+                analysis_sync = {"status": "ready"}
+            except Exception as exc:
+                analysis_sync = {"status": "failed", "message": str(exc)}
+        authors = meta.get("authors")
+        if isinstance(authors, str):
+            authors = [{"name": a.strip()} for a in authors.replace(";", ",").split(",") if a.strip()]
+        elif isinstance(authors, list):
+            authors = [{"name": a} if isinstance(a, str) else a for a in authors]
+        try:
+            year = int(str(meta.get("year"))[:4]) if meta.get("year") else None
+        except (ValueError, TypeError):
+            year = None
+        run_id = str(((analysis or {}).get("analysis", {}).get("argumentation") or {}).get("id") or doi)
+        metadata = {
+            "title": meta.get("title") or record.get("title") or doi, "abstract": meta.get("abstract"),
+            "authors": authors, "year": year, "journal": meta.get("journal") or meta.get("venue"),
+            "journalIssn": meta.get("journalIssn") or meta.get("issn"), "volume": meta.get("volume"),
+            "issue": meta.get("issue"), "pages": meta.get("pages"), "publicationDate": meta.get("publicationDate"),
+            "publisher": meta.get("publisher"), "language": meta.get("language"),
+            "publicationType": meta.get("publicationType"), "keywords": meta.get("keywords"),
+            "openAlexId": meta.get("openAlexId"), "externalIdentifiers": meta.get("externalIdentifiers"),
+            "doi": doi, "sourceUrl": record.get("resolved_url") or meta.get("sourceUrl") or meta.get("url"),
+            "sourceProvider": record.get("source") or meta.get("sourceProvider") or "SLR_PAPER_FETCHER",
+            "sourceId": run_id, "sourcePriority": 10,
+        }
+        # Zod optional fields must be absent when unknown; JSON null is not accepted.
+        metadata = {key: value for key, value in metadata.items() if value is not None}
+        pdf = Path(target_path).read_bytes()
+        metadata_bytes = json.dumps(metadata, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+        analysis_bytes = json.dumps(analysis, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode() if analysis else b""
+        digest = hashlib.sha256(pdf + b"\0" + metadata_bytes + b"\0" + analysis_bytes + b"\0" + (mapping or b"")).hexdigest()
+        files = {"pdf": (Path(target_path).name, pdf, "application/pdf")}
+        if analysis and mapping is not None:
+            files["analysis"] = ("analysis.json", analysis_bytes, "application/json")
+            files["fullTextMapping"] = (Path(target_path).with_suffix(".fulltext.json").name, mapping, "application/json")
+        response = requests.post(f"{base_url}/api/public/v1/repository/works/import",
+            headers={"X-API-Key": api_key, "Idempotency-Key": f"paper-fetcher-repository-{digest}"},
+            data={"doi": doi, "metadata": metadata_bytes.decode("utf-8")}, files=files, timeout=180)
+        if response.status_code not in (200, 201):
+            try:
+                payload = response.json()
+                message = payload.get("message") or payload.get("error", {}).get("message") or response.text
+            except Exception:
+                message = response.text
+            return {"success": False, "message": f"Repository import HTTP {response.status_code}: {message}"}
+        result = response.json().get("data") or {}
+        if result.get("analysisStatus") == "READY":
+            analysis_sync = {"status": "uploaded", "run_id": result.get("analysisRunId")}
+        elif analysis_sync.get("status") == "ready":
+            analysis_sync = {"status": "failed", "message": "Repository did not accept the analysis payload."}
+        return {"success": True, "data": result, "analysis_sync": analysis_sync}
+    except Exception as exc:
+        return {"success": False, "message": str(exc)}
+
+
 @app.post("/api/slr/push-papers")
 async def push_papers_to_slr(request: Request):
     """Đẩy các file PDF đã chọn lên SLR Project qua Public API với streaming tiến trình thời gian thực (NDJSON)."""
@@ -1340,16 +1532,21 @@ async def push_papers_to_slr(request: Request):
         return JSONResponse({"success": False, "error": "Dữ liệu JSON không hợp lệ."}, status_code=400)
 
     project_id = str(data.get("project_id") or "").strip()
+    destination = str(data.get("destination") or "project").strip().lower()
     dois = data.get("dois", [])
 
-    if not project_id:
+    if destination not in {"project", "repository"}:
+        return JSONResponse({"success": False, "error": "destination must be project or repository."}, status_code=400)
+    if destination == "project" and not project_id:
         return JSONResponse({"success": False, "error": "Vui lòng chọn hoặc nhập Mã Dự Án (Project ID)."}, status_code=400)
     if not isinstance(dois, list) or not dois:
         return JSONResponse({"success": False, "error": "Chưa chọn bài báo nào để tải lên."}, status_code=400)
 
     settings.refresh_api_credentials()
     base_url = settings.SLR_API_BASE_URL or "http://127.0.0.1:5000"
-    api_key = settings.SLR_PUBLIC_API_KEY
+    api_key = settings.SLR_API_KEY
+    if not api_key:
+        return JSONResponse({"success": False, "error": "Configure an SLR API key first."}, status_code=400)
     upload_url = f"{base_url}/api/public/papers/upload-pdf"
 
     store = get_store()
@@ -1362,7 +1559,7 @@ async def push_papers_to_slr(request: Request):
         success_count = 0
         fail_count = 0
 
-        yield json.dumps({"type": "start", "total": total, "project_id": project_id}) + "\n"
+        yield json.dumps({"type": "start", "total": total, "project_id": project_id or None, "destination": destination}) + "\n"
 
         for idx, doi in enumerate(dois):
             record = await asyncio.to_thread(store.get, doi)
@@ -1403,6 +1600,35 @@ async def push_papers_to_slr(request: Request):
                 continue
 
             try:
+                if destination == "repository":
+                    result = await asyncio.to_thread(_push_paper_to_repository, store, doi, record, target_path, base_url, api_key)
+                    if not result.get("success"):
+                        fail_count += 1
+                        yield json.dumps({"type": "item_progress", "index": idx, "doi": doi, "filename": target_path.name, "success": False, "message": result.get("message"), "completed": idx + 1, "total": total, "success_count": success_count, "fail_count": fail_count}, ensure_ascii=False) + "\n"
+                        continue
+                    imported = result.get("data") or {}
+                    analysis_sync = result.get("analysis_sync") or {"status": "not_available"}
+                    partial_failure = analysis_sync.get("status") == "failed"
+                    message = f"Imported into shared repository (Work: {imported.get('workId')})."
+                    if analysis_sync.get("status") == "uploaded":
+                        success_count += 1
+                        message += " Analysis and full-text mapping uploaded."
+                    elif partial_failure:
+                        fail_count += 1
+                        message += " PDF/metadata uploaded; analysis sync failed: " + str(analysis_sync.get("message"))
+                    else:
+                        success_count += 1
+                    try:
+                        raw = record.get("metadata")
+                        meta = json.loads(raw) if isinstance(raw, str) and raw.strip() else (raw if isinstance(raw, dict) else {})
+                        meta["last_uploaded_repository_work_id"] = imported.get("workId")
+                        meta["uploaded_at"] = datetime.now(timezone.utc).isoformat()
+                        store.update(doi, record["status"], metadata=meta, message="Uploaded to shared Research Repository")
+                    except Exception as exc:
+                        print(f"[STORE UPDATE] Error: {exc}")
+                    yield json.dumps({"type": "item_progress", "index": idx, "doi": doi, "filename": target_path.name, "success": not partial_failure, "outcome": "partial" if partial_failure else "success", "message": message, "work_id": imported.get("workId"), "analysis_sync": analysis_sync, "completed": idx + 1, "total": total, "success_count": success_count, "fail_count": fail_count}, ensure_ascii=False) + "\n"
+                    continue
+
                 def upload_one_file():
                     # Parse metadata safely if present
                     meta_dict = {}
@@ -1520,7 +1746,16 @@ async def push_papers_to_slr(request: Request):
                     res_json = resp.json()
                     imported_ids = res_json.get("data", {}).get("importedPaperIds", [])
                     msg = f"Đã upload & import thành công (Mã Paper: {', '.join(imported_ids) if imported_ids else 'OK'})"
-                    success_count += 1
+                    analysis_sync = await asyncio.to_thread(
+                        _push_analysis_run_to_slr, store, doi, record, target_path, base_url, api_key, project_id
+                    )
+                    if not analysis_sync.get("success"):
+                        fail_count += 1
+                        msg += "; PDF upload succeeded but analysis sync failed: " + str(analysis_sync.get("message"))
+                    else:
+                        success_count += 1
+                        if analysis_sync.get("status") == "uploaded":
+                            msg += " and the analysis run/full-text mapping were synced"
 
                     try:
                         raw_meta = record.get("metadata")
@@ -1544,9 +1779,11 @@ async def push_papers_to_slr(request: Request):
                         "index": idx,
                         "doi": doi,
                         "filename": target_path.name,
-                        "success": True,
+                        "success": bool(analysis_sync.get("success")),
+                        "outcome": "success" if analysis_sync.get("success") else "partial",
                         "message": msg,
                         "paper_ids": imported_ids,
+                        "analysis_sync": analysis_sync,
                         "completed": idx + 1,
                         "total": total,
                         "success_count": success_count,
@@ -1624,7 +1861,8 @@ async def push_papers_to_slr(request: Request):
             "total": total,
             "success_count": success_count,
             "fail_count": fail_count,
-            "project_id": project_id
+            "project_id": project_id or None,
+            "destination": destination
         }, ensure_ascii=False) + "\n"
 
     return StreamingResponse(

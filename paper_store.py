@@ -19,6 +19,63 @@ STATES = {
 }
 
 
+def remap_outline_source_ids(value, section_id_map, paragraph_id_map):
+    """Remap source references in nested analysis payloads without changing structure IDs."""
+    if isinstance(value, dict):
+        output = {}
+        for key, item in value.items():
+            if key in {"section_id", "parent_section_id"} and isinstance(item, str):
+                output[key] = section_id_map.get(item, item)
+            elif key in {"section_ids", "source_section_ids"} and isinstance(item, list):
+                output[key] = [section_id_map.get(source_id, source_id) if isinstance(source_id, str) else source_id
+                               for source_id in item]
+            elif key == "paragraph_id" and isinstance(item, str):
+                output[key] = paragraph_id_map.get(item, item)
+            elif key in {"paragraph_ids", "source_paragraph_ids"} and isinstance(item, list):
+                output[key] = [paragraph_id_map.get(source_id, source_id) if isinstance(source_id, str) else source_id
+                               for source_id in item]
+            elif key == "paragraphs" and isinstance(item, list):
+                output[key] = []
+                for paragraph in item:
+                    mapped = remap_outline_source_ids(paragraph, section_id_map, paragraph_id_map)
+                    if isinstance(mapped, dict) and isinstance(mapped.get("id"), str):
+                        mapped["id"] = paragraph_id_map.get(mapped["id"], mapped["id"])
+                    output[key].append(mapped)
+            else:
+                output[key] = remap_outline_source_ids(item, section_id_map, paragraph_id_map)
+        return output
+    if isinstance(value, list):
+        return [remap_outline_source_ids(item, section_id_map, paragraph_id_map) for item in value]
+    return value
+
+
+def repair_legacy_outline_group_references(profile, run_id, metadata=None):
+    """Resolve pre-fix unscoped group IDs against the run-scoped outline IDs at read time."""
+    outline = profile.get("outline") or []
+    section_map = {}
+    for item in outline:
+        section_id = item.get("section_id")
+        if isinstance(section_id, str) and section_id.startswith(f"{run_id}:"):
+            section_map[section_id.split(":", 1)[1]] = section_id
+    for group in profile.get("outline_groups") or []:
+        raw_ids = group.get("source_section_ids") or group.get("section_ids") or []
+        fixed = [section_map.get(source_id, source_id) if isinstance(source_id, str) else source_id for source_id in raw_ids]
+        group["section_ids"] = fixed
+        group["source_section_ids"] = list(fixed)
+        for source in group.get("source_headings") or []:
+            source_id = source.get("section_id")
+            if isinstance(source_id, str):
+                source["section_id"] = section_map.get(source_id, source_id)
+    if not (profile.get("outline_layers") or {}).get("semantic", {}).get("normalized_outline"):
+        try:
+            from ai_analysis import build_outline_layers
+            profile["outline_layers"] = build_outline_layers(outline, profile.get("outline_groups", []),
+                metadata, profile.get("keywords", []))
+        except (ImportError, TypeError, KeyError):
+            pass
+    return profile
+
+
 class PaperStore:
     def __init__(self, path):
         self.path = Path(path)
@@ -249,22 +306,21 @@ class PaperStore:
         now = datetime.now(timezone.utc).isoformat()
         sections = run.get("document", {}).get("sections", [])
         section_id_map = {section["id"]: f"{run['id']}:{section['id']}" for section in sections if section.get("id")}
+        paragraph_id_map = {paragraph["id"]: f"{run['id']}:{paragraph['id']}"
+                            for section in sections for paragraph in section.get("paragraphs", []) if paragraph.get("id")}
         for section in sections:
             if section.get("id") in section_id_map:
                 section["id"] = section_id_map[section["id"]]
+            if section.get("parent_section_id") in section_id_map:
+                section["parent_section_id"] = section_id_map[section["parent_section_id"]]
+            for paragraph in section.get("paragraphs", []):
+                if paragraph.get("id") in paragraph_id_map:
+                    paragraph["id"] = paragraph_id_map[paragraph["id"]]
         for proposition in run.get("propositions", []):
             if proposition.get("section_id") in section_id_map:
                 proposition["section_id"] = section_id_map[proposition["section_id"]]
 
-        def remap_section_references(value):
-            if isinstance(value, dict):
-                return {key: section_id_map.get(item, item) if key == "section_id" and isinstance(item, str)
-                        else remap_section_references(item) for key, item in value.items()}
-            if isinstance(value, list):
-                return [remap_section_references(item) for item in value]
-            return value
-
-        run["analysis_payload"] = remap_section_references(run.get("analysis_payload", {}))
+        run["analysis_payload"] = remap_outline_source_ids(run.get("analysis_payload", {}), section_id_map, paragraph_id_map)
         with self.connect() as db:
             db.execute("UPDATE cross_paper_relationships SET stale=1 WHERE source_doi=? OR target_doi=?", (doi, doi))
             db.execute("""INSERT INTO analysis_runs
@@ -322,7 +378,11 @@ class PaperStore:
             if not run:
                 return None
             run = dict(run)
+            run["validation"] = json.loads(run.get("validation") or "{}")
+            run["document_metadata"] = json.loads(run.get("document_metadata") or "{}")
             run_id = run["id"]
+            paper_row = db.execute("SELECT file_path FROM papers WHERE doi=?", (doi,)).fetchone()
+            current_pdf_path = (paper_row["file_path"] if paper_row else None)
             sections = [dict(row) for row in db.execute("SELECT * FROM source_sections WHERE run_id=? ORDER BY start_offset", (run_id,))]
             propositions = [dict(row) for row in db.execute("SELECT * FROM scientific_propositions WHERE run_id=? ORDER BY rowid", (run_id,))]
             relations = [dict(row) for row in db.execute("SELECT * FROM argument_relations WHERE run_id=? ORDER BY rowid", (run_id,))]
@@ -345,13 +405,143 @@ class PaperStore:
             item["premise_ids"] = json.loads(item.get("premise_ids") or "[]")
             item["provenance"] = json.loads(item.get("provenance") or "{}")
             item["is_inferred"] = bool(item["is_inferred"])
+        # Legacy runs stored a model-written proposition `text` beside a validated
+        # source quote. Expose the quote as the component text; never show an
+        # unquoted source proposition or a reconstructed warrant as paper text.
+        from ai_analysis import _find_pdf_quote_span, _pdf_artifact_identity, _quote_span, _read_pdf_pages
+        section_by_id = {section["id"]: section for section in sections}
+        suppressed_source_ids = set()
+        suppressed_warrant_ids = set()
+        suppressed_hypothetical_ids = set()
+        current_pdf_identity, current_pdf_pages, pdf_verification_error = None, (), None
+        try:
+            if current_pdf_path and Path(current_pdf_path).is_file():
+                current_pdf_identity = _pdf_artifact_identity(current_pdf_path)
+                current_pdf_pages = _read_pdf_pages(current_pdf_path, current_pdf_identity)
+            else:
+                pdf_verification_error = "current_pdf_unavailable"
+        except Exception as exc:
+            pdf_verification_error = str(exc)[:240]
+        pinned_pdf = run["document_metadata"].get("pdf_artifact") or {}
+        pinned_pdf_sha256 = pinned_pdf.get("sha256")
+        pdf_artifact_changed = bool(pinned_pdf_sha256 and current_pdf_identity and
+                                    pinned_pdf_sha256 != current_pdf_identity.get("sha256"))
+        for item in propositions:
+            item_provenance = item.get("provenance") if isinstance(item.get("provenance"), dict) else {}
+            if item.get("assertion_origin") == "hypothetical":
+                suppressed_hypothetical_ids.add(item["id"])
+                continue
+            if ("warrant" in item.get("argumentative_roles", []) and
+                    (item.get("inference_status") or item_provenance.get("inference_status")) == "reconstructed_pending_review" and
+                    not item.get("source_quote")):
+                suppressed_warrant_ids.add(item["id"])
+                continue
+            origin = item.get("assertion_origin") or ("inferred" if item.get("is_inferred") else "source")
+            if origin != "source":
+                continue
+            quote = str(item.get("source_quote") or "")
+            if not quote:
+                suppressed_source_ids.add(item["id"])
+                continue
+            section = section_by_id.get(item.get("section_id"))
+            source_slice = None
+            if section:
+                section_text = section.get("text") or ""
+                try:
+                    section_start = int(section.get("start_offset") or 0)
+                except (TypeError, ValueError):
+                    section_start = 0
+                offsets = item.get("source_offsets") or {}
+                if isinstance(offsets, dict):
+                    try:
+                        local_start = int(offsets.get("start", -1)) - section_start
+                        local_end = int(offsets.get("end", -1)) - section_start
+                    except (TypeError, ValueError):
+                        local_start, local_end = -1, -1
+                    if 0 <= local_start < local_end <= len(section_text):
+                        candidate = section_text[local_start:local_end]
+                        if " ".join(candidate.split()) == " ".join(quote.split()):
+                            source_slice = candidate
+                if source_slice is None:
+                    span = _quote_span(section_text, quote)
+                    if span:
+                        local_start, local_end = span
+                        source_slice = section_text[local_start:local_end]
+                        item["source_offsets"] = {"start": section_start + local_start, "end": section_start + local_end}
+                if source_slice:
+                    item["source_page"] = item.get("source_page") or section.get("page")
+            # Validate the saved proposition against the exact PDF currently served
+            # to the reader. A matching GROBID quote alone is not enough: the PDF
+            # artifact can be replaced after the analysis run.
+            pdf_anchor = (_find_pdf_quote_span(current_pdf_pages, source_slice, item.get("source_page"))
+                          if source_slice and current_pdf_pages and not pdf_artifact_changed else None)
+            if not source_slice or not pdf_anchor:
+                suppressed_source_ids.add(item["id"])
+                continue
+            item["source_quote"] = pdf_anchor["quote"]
+            item["text"] = item["source_quote"]
+            item["normalized_text"] = " ".join(item["text"].lower().split())
+            item["source_page"] = pdf_anchor["page"]
+            item_provenance["pdf_anchor"] = {"page": pdf_anchor["page"],
+                "start_offset": pdf_anchor["start_offset"], "end_offset": pdf_anchor["end_offset"],
+                "pdf_sha256": (current_pdf_identity or {}).get("sha256")}
+            item_provenance["source_verification"] = "verified_against_current_pdf"
+            item_provenance["component_text_policy"] = "verbatim_source_quote"
+            item["provenance"] = item_provenance
+        suppressed_ids = suppressed_source_ids | suppressed_warrant_ids | suppressed_hypothetical_ids
+        if suppressed_ids:
+            propositions = [item for item in propositions if item["id"] not in suppressed_ids]
+            surviving_ids = {item["id"] for item in propositions}
+            cleaned_relations = []
+            for relation in relations:
+                if relation.get("conclusion_id") in suppressed_ids or relation.get("target_id") in suppressed_ids:
+                    continue
+                relation["premise_ids"] = [item_id for item_id in relation.get("premise_ids", []) if item_id in surviving_ids]
+                if not relation["premise_ids"]:
+                    continue
+                quote = str(relation.get("supporting_quote") or "")
+                proposition_by_id = {item["id"]: item for item in propositions}
+                source_quotes = [proposition_by_id[item_id].get("source_quote") or ""
+                                 for item_id in relation["premise_ids"] if item_id in proposition_by_id]
+                verified_quote = next((source[span[0]:span[1]] for source in source_quotes
+                                       if quote and (span := _quote_span(source, quote))), "")
+                relation["supporting_quote"] = verified_quote
+                cleaned_relations.append(relation)
+            relations = cleaned_relations
+        if not isinstance(run["validation"], dict):
+            run["validation"] = {}
+        run["validation"]["component_text_policy"] = "verbatim_verified_source_spans_only"
+        run["validation"]["legacy_unquoted_components_suppressed"] = len(suppressed_source_ids)
+        run["validation"]["legacy_reconstructed_warrants_suppressed"] = len(suppressed_warrant_ids)
+        run["validation"]["legacy_hypothetical_components_suppressed"] = len(suppressed_hypothetical_ids)
+        run["validation"]["source_components_suppressed_without_pdf_match"] = len(suppressed_source_ids)
+        run["validation"]["source_pdf_artifact_status"] = (
+            "artifact_changed" if pdf_artifact_changed else
+            "verified_pinned_pdf" if pinned_pdf_sha256 and current_pdf_identity else
+            "legacy_quotes_verified_against_current_pdf" if current_pdf_identity else "verification_unavailable")
+        if pdf_verification_error:
+            run["validation"]["source_pdf_verification_error"] = pdf_verification_error
         for item in reviews:
             item["change"] = json.loads(item.get("change_json") or "{}")
         run["prompt_versions"] = json.loads(run.get("prompt_versions") or "{}")
-        run["document_metadata"] = json.loads(run.get("document_metadata") or "{}")
-        run["validation"] = json.loads(run.get("validation") or "{}")
         run["analysis_payload"] = json.loads(run.get("analysis_payload") or "{}")
         run["sections"] = sections
+        profile = run["analysis_payload"].get("paper_profile")
+        if isinstance(profile, dict):
+            source_sections = {item["id"]: item for item in sections}
+            for outline_item in profile.get("outline", []):
+                source = source_sections.get(outline_item.get("section_id"))
+                if not source:
+                    continue
+                for key in ("start_offset", "end_offset", "page"):
+                    if outline_item.get(key) is None and source.get(key) is not None:
+                        outline_item[key] = source[key]
+                # Old runs kept section text but not paragraph segmentation. Expose it
+                # as legacy source content; never fabricate paragraph IDs for it.
+                if not outline_item.get("paragraphs"):
+                    outline_item["source_content"] = source.get("text", "")
+            run["analysis_payload"]["paper_profile"] = repair_legacy_outline_group_references(
+                profile, run_id, run.get("document_metadata", {}))
         run["propositions"] = propositions
         run["relations"] = relations
         try:
@@ -359,6 +549,14 @@ class PaperStore:
             if not run["analysis_payload"].get("schema_version"):
                 run["analysis_payload"] = build_unified_analysis(doi, propositions, relations)
                 run["analysis_payload"]["provenance"]["legacy_run_derived_at_read"] = True
+            elif suppressed_ids:
+                refreshed = build_unified_analysis(doi, propositions, relations)
+                previous_payload = run["analysis_payload"]
+                for key in ("paper_profile", "mvp3", "review_history"):
+                    if key in previous_payload:
+                        refreshed[key] = previous_payload[key]
+                refreshed["provenance"]["source_components_reverified_at_read"] = True
+                run["analysis_payload"] = refreshed
             elif int(run["analysis_payload"].get("argument_card_schema_version") or 0) < ARGUMENT_CARD_SCHEMA_VERSION:
                 refreshed = build_unified_analysis(doi, propositions, relations)
                 run["analysis_payload"]["arguments"] = refreshed["arguments"]
@@ -391,6 +589,17 @@ class PaperStore:
             run["validation"] = derived_validation
         except (ImportError, KeyError, TypeError):
             pass
+        run["validation"]["component_text_policy"] = "verbatim_verified_source_spans_only"
+        run["validation"]["legacy_unquoted_components_suppressed"] = len(suppressed_source_ids)
+        run["validation"]["legacy_reconstructed_warrants_suppressed"] = len(suppressed_warrant_ids)
+        run["validation"]["legacy_hypothetical_components_suppressed"] = len(suppressed_hypothetical_ids)
+        run["validation"]["source_components_suppressed_without_pdf_match"] = len(suppressed_source_ids)
+        run["validation"]["source_pdf_artifact_status"] = (
+            "artifact_changed" if pdf_artifact_changed else
+            "verified_pinned_pdf" if pinned_pdf_sha256 and current_pdf_identity else
+            "legacy_quotes_verified_against_current_pdf" if current_pdf_identity else "verification_unavailable")
+        if pdf_verification_error:
+            run["validation"]["source_pdf_verification_error"] = pdf_verification_error
         run["graph"] = {"nodes": nodes, "edges": edges, "version": run.get("graph_version", 1),
                         "schema_version": derived_graph.get("version", 1) if derived_graph else 1,
                         "validation": derived_validation or run.get("validation", {}),

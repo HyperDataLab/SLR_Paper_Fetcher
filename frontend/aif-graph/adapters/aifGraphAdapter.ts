@@ -5,14 +5,13 @@ const TYPE_MAP: Record<string, AifNodeType> = { I: 'information', RA: 'inference
 const TYPE_TITLES: Record<string, string> = { I: 'Information', RA: 'Rule of Inference', CA: 'Conflict Application', PA: 'Preference Application' };
 
 function nodeSize(node: AifRawNode) {
-  if (node.node_type !== 'I') return { width: node.node_type === 'RA' ? 132 : 98, height: node.node_type === 'RA' ? 132 : 98 };
-  const width = 264;
-  const content = node.text || '';
-  const lines = content.split('\n').reduce((count, line) => count + Math.max(1, Math.ceil(line.length / 34)), 0);
-  return { width, height: Math.max(104, 80 + Math.min(lines, 4) * 18) };
+  if (node.node_type === 'RA') return { width: 136, height: 136 };
+  if (node.node_type === 'CA' || node.node_type === 'PA') return { width: 166, height: 166 };
+  return { width: 252, height: 110 };
 }
 
 function relationshipKind(edge: AifRawEdge, nodes: Map<string, AifRawNode>): AifEdgeData['relationshipKind'] {
+  if (edge.craft_relationship === 'challenge') return 'conflict';
   const source = nodes.get(edge.source_node_id)?.node_type;
   const target = nodes.get(edge.target_node_id)?.node_type;
   if (source === 'CA' || target === 'CA') return 'conflict';

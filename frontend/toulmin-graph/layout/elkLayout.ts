@@ -2,7 +2,7 @@ import type { ELK as ElkInstance, ElkExtendedEdge, ElkNode, ElkPort } from 'elkj
 import type { ToulminFlowEdge, ToulminFlowNode, ToulminLayoutResult } from '../types/toulmin.types';
 
 let elkPromise: Promise<ElkInstance> | null = null;
-const NODE_WIDTH = 284;
+const NODE_WIDTH = 252;
 const STACK_GAP = 38;
 const COLUMN_GAP = 46;
 const EVIDENCE_GAP = 24;

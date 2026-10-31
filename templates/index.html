@@ -188,8 +188,12 @@
         }
     </style>
   <script src="/static/js/sidebar.js" defer></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', path='css/product-ui.css') }}">
 </head>
-<body class="text-slate-800 w-full min-w-full min-h-screen flex flex-col md:flex-row bg-slate-50 overflow-x-hidden">
+<body data-page="search" class="text-slate-800 w-full min-w-full min-h-screen flex flex-col md:flex-row bg-slate-50 overflow-x-hidden">
 
     <!-- Mobile Overlay -->
     {% set sidebar_active_tab = 'fetch' %}
@@ -222,10 +226,10 @@
         <!-- Main Content -->
         <main class="w-full px-6 py-8 flex-1">
         <!-- VIEW 1: THU THẬP & TẢI BÀI -->
-        <div id="viewFetch" class="{% if active_tab == 'upload' %}hidden{% endif %}">
+        <div id="viewFetch" class="search-workspace {% if active_tab == 'upload' %}hidden{% endif %}">
 
         <!-- Banner / Intro -->
-        <div class="mb-6 flex flex-col md:flex-row md:items-end justify-between gap-4">
+        <div class="search-page-heading mb-5 flex flex-col md:flex-row md:items-end justify-between gap-4">
             <div>
                 <h1 class="text-xl font-semibold text-slate-900 tracking-tight">Thu thập full text</h1>
                 <p class="text-slate-600 text-sm mt-1 max-w-3xl">Tìm PDF Open Access trước, rồi dùng phiên VNU/OpenAthens cho bài còn khóa. Mỗi bài báo cáo rõ đã tải, phải mua, hay cần xác minh.</p>
@@ -233,7 +237,7 @@
         </div>
 
         <!-- Automatic download sources -->
-        <section class="mb-6 bg-white rounded-xl border border-slate-200 p-5" aria-labelledby="autoSourcesTitle">
+        <section class="search-source-guide mb-5 bg-white rounded-xl border border-slate-200 p-4" aria-labelledby="autoSourcesTitle">
             <div class="flex flex-wrap items-start justify-between gap-2 mb-4">
                 <div>
                     <h2 id="autoSourcesTitle" class="text-sm font-semibold text-slate-900">Luồng tải tự động</h2>
@@ -272,7 +276,7 @@
         </section>
 
         <!-- Input Section -->
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+        <div class="search-input-workbench grid grid-cols-1 md:grid-cols-[minmax(0,1.15fr)_minmax(300px,.85fr)] gap-4 mb-6">
             <!-- Textarea Input -->
             <div class="bg-white p-6 rounded-2xl border border-slate-200 custom-shadow flex flex-col justify-between">
                 <div>
@@ -332,7 +336,7 @@
         </div>
 
         <!-- Results Table -->
-        <div id="resultsSection" class="bg-white rounded-2xl border border-slate-200 custom-shadow overflow-hidden hidden">
+        <div id="resultsSection" class="search-results bg-white rounded-2xl border border-slate-200 custom-shadow overflow-hidden hidden">
             <div class="p-4 border-b border-slate-100 flex flex-col xl:flex-row xl:items-center justify-between gap-4">
                 <div class="flex flex-wrap items-center gap-3">
                     <span class="font-semibold text-sm text-slate-800">Danh sách kết quả</span>
@@ -384,8 +388,8 @@
                         <tr>
                             <th class="p-4 w-72 min-w-[240px]">Tên file lưu</th>
                             <th class="p-4 min-w-[320px]">Tiêu đề / DOI</th>
-                            <th class="p-4 w-36 min-w-[140px] whitespace-nowrap">Trạng thái</th>
-                            <th class="p-4 w-60 min-w-[220px] whitespace-nowrap text-right">Hành động tải / Truy cập</th>
+                            <th class="p-4 w-36 min-w-[140px] whitespace-nowrap">Trạng thái PDF</th>
+                            <th class="p-4 w-60 min-w-[220px] whitespace-nowrap text-right">Thao tác</th>
                         </tr>
                     </thead>
                     <tbody id="resultsBody" class="divide-y divide-slate-100">
@@ -425,20 +429,20 @@
         </div>
         
         <!-- VIEW 2: KHO BÀI & UPLOAD -->
-        <div id="viewUpload" class="{% if active_tab != 'upload' %}hidden{% endif %} relative">
+        <div id="viewUpload" class="library-workspace {% if active_tab != 'upload' %}hidden{% endif %} relative">
 
         
         <!-- Hero Section & Project Selection Banner -->
-        <div class="mb-6 bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white rounded-2xl p-6 shadow-xl border border-indigo-500/20 relative z-30">
+        <section class="library-project-panel mb-5 rounded-xl border border-slate-200 bg-white p-5 relative z-30">
             <!-- Background glow decoration safely clipped -->
-            <div class="absolute inset-0 rounded-2xl overflow-hidden pointer-events-none">
+            <div class="library-panel-decoration absolute inset-0 rounded-2xl overflow-hidden pointer-events-none">
                 <div class="absolute -right-10 -bottom-10 w-64 h-64 bg-indigo-500/10 rounded-full blur-3xl"></div>
                 <div class="absolute left-1/3 -top-10 w-48 h-48 bg-blue-500/10 rounded-full blur-2xl"></div>
             </div>
 
-            <div class="relative z-10 flex flex-col lg:flex-row lg:items-center justify-between gap-6">
+            <div class="relative z-10 flex flex-col lg:flex-row lg:items-center justify-between gap-5">
                 <!-- Left Title & Description -->
-                <div class="max-w-xl">
+                <div class="library-project-copy max-w-xl">
                     <div class="flex items-center gap-2 mb-2">
                         <span class="bg-indigo-500/20 text-indigo-300 text-[11px] font-bold px-2.5 py-0.5 rounded-full border border-indigo-400/30 flex items-center gap-1.5">
                             <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
@@ -457,7 +461,7 @@
                 </div>
 
                 <!-- Right: Interactive Project Selector & Settings -->
-                <div class="bg-white/10 backdrop-blur-md rounded-xl p-4 border border-white/10 flex w-full flex-col gap-3 lg:w-auto sm:min-w-[380px] lg:min-w-[480px] xl:min-w-[560px]">
+                <div class="library-project-controls rounded-lg border border-slate-200 bg-slate-50 p-3 flex w-full flex-col gap-3 lg:w-auto sm:min-w-[380px] lg:min-w-[480px] xl:min-w-[560px]">
                     <div class="flex-1 min-w-0">
                         <div class="flex items-center justify-between mb-1.5">
                             <label class="text-[11px] font-bold uppercase tracking-wider text-indigo-200 flex items-center gap-1.5">
@@ -493,6 +497,11 @@
 
                             <!-- Dropdown Menu -->
                             <div id="projectDropdownMenu" class="hidden absolute right-0 left-auto w-full sm:w-[520px] lg:w-[580px] max-w-[92vw] mt-2 bg-slate-900/95 backdrop-blur-xl border border-indigo-500/30 rounded-2xl shadow-2xl z-50 p-2 text-white overflow-hidden">
+                                <button type="button" onclick="selectRepositoryDestination()" class="w-full text-left p-2.5 mb-2 rounded-xl border border-emerald-400/30 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-200 flex items-center gap-2.5 text-xs font-semibold transition-colors cursor-pointer">
+                                    <span class="w-6 h-6 rounded-lg bg-emerald-500/20 text-emerald-300 flex items-center justify-center shrink-0">DB</span>
+                                    <span>Shared Research Repository (no project)</span>
+                                </button>
+
                                 <!-- Search filter -->
                                 <div class="p-1 pb-2 border-b border-white/10" id="projectSearchContainer">
                                     <div class="relative">
@@ -531,11 +540,11 @@
 
                 </div>
             </div>
-        </div>
+        </section>
 
-        <!-- Metric Cards -->
-        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-            <div class="bg-white p-4 rounded-xl border border-slate-200 custom-shadow flex items-center gap-4">
+        <!-- Library summary -->
+        <div class="library-metrics grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+            <div class="library-metric bg-white p-4 rounded-xl border border-slate-200 custom-shadow flex items-center gap-4">
                 <div class="w-10 h-10 rounded-full bg-blue-50 flex items-center justify-center text-blue-600">
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path></svg>
                 </div>
@@ -544,7 +553,7 @@
                     <p class="text-xl font-bold text-slate-800" id="metricTotal">0</p>
                 </div>
             </div>
-            <div class="bg-white p-4 rounded-xl border border-emerald-100 bg-emerald-50/20 custom-shadow flex items-center gap-4">
+            <div class="library-metric bg-white p-4 rounded-xl border border-emerald-100 bg-emerald-50/20 custom-shadow flex items-center gap-4">
                 <div class="w-10 h-10 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-600">
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
                 </div>
@@ -553,7 +562,7 @@
                     <p class="text-xl font-bold text-emerald-700" id="metricSelected">0</p>
                 </div>
             </div>
-            <div class="bg-white p-4 rounded-xl border border-slate-200 custom-shadow flex items-center gap-4">
+            <div class="library-metric bg-white p-4 rounded-xl border border-slate-200 custom-shadow flex items-center gap-4">
                 <div class="w-10 h-10 rounded-full bg-purple-50 flex items-center justify-center text-purple-600">
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4m0 5c0 2.21-3.582 4-8 4s-8-1.79-8-4"></path></svg>
                 </div>
@@ -562,7 +571,7 @@
                     <p class="text-xl font-bold text-slate-800" id="metricSize">0 MB</p>
                 </div>
             </div>
-            <div class="bg-white p-4 rounded-xl border border-slate-200 custom-shadow flex items-center gap-4">
+            <div class="library-metric bg-white p-4 rounded-xl border border-slate-200 custom-shadow flex items-center gap-4">
                 <div class="w-10 h-10 rounded-full bg-slate-50 flex items-center justify-center text-slate-600">
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2"></path></svg>
                 </div>
@@ -574,7 +583,7 @@
         </div>
 
         <!-- Toolbar -->
-        <div class="bg-white p-3 rounded-t-xl border border-slate-200 border-b-0 flex flex-col sm:flex-row gap-3 items-center justify-between">
+        <div class="library-toolbar bg-white p-3 rounded-t-xl border border-slate-200 border-b-0 flex flex-col sm:flex-row gap-3 items-center justify-between">
             <div class="flex items-center gap-2 w-full sm:w-auto">
                 <button onclick="selectAll(true)" class="text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded-lg transition-colors">Chọn tất cả</button>
                 <button onclick="selectAll(false)" class="text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded-lg transition-colors">Bỏ chọn</button>
@@ -631,7 +640,7 @@
         </div>
 
         <!-- Table -->
-        <div class="bg-white border border-slate-200 rounded-b-xl custom-shadow overflow-hidden mb-24">
+        <div class="library-table-surface bg-white border border-slate-200 rounded-b-xl custom-shadow overflow-hidden mb-24">
             <div class="overflow-x-auto min-h-[300px]">
                 <table class="w-full text-left text-sm text-slate-600 relative">
                     <thead class="bg-slate-50 border-b border-slate-200 text-[11px] font-semibold uppercase tracking-wider text-slate-500 sticky top-0 z-10">
@@ -641,8 +650,8 @@
                             </th>
                             <th class="p-4 min-w-[320px]">Bài báo (Tiêu đề & DOI)</th>
                             <th class="p-4 w-72 min-w-[240px]">File PDF</th>
-                            <th class="p-4 w-36 min-w-[130px] whitespace-nowrap">Nguồn</th>
-                            <th class="p-4 w-44 min-w-[150px] whitespace-nowrap">Trạng thái Dự án</th>
+                            <th class="p-4 w-36 min-w-[130px] whitespace-nowrap">Loại truy cập</th>
+                            <th class="p-4 w-44 min-w-[150px] whitespace-nowrap">Phân tích AI</th>
                             <th class="p-4 w-28 min-w-[100px] text-right whitespace-nowrap">Thao tác</th>
                         </tr>
                     </thead>
@@ -684,6 +693,7 @@
         </footer>
     </div>
 
+    <script src="/static/js/research-results-table.js"></script>
     <script>
         const fileInput = document.getElementById('fileInput');
         const dropZone = document.getElementById('dropZone');
@@ -733,13 +743,9 @@
             if (res.already_exists) return 'downloaded';
             if (!res.doi || !res.doi.startsWith('10.') || res.status === 'INVALID_DOI' || res.state === 'INVALID_DOI') return 'invalid';
             if (res.state === 'PURCHASE_REQUIRED') return 'purchase';
-            if (['FAILED', 'NO_ACCESS', 'CAPTCHA_REQUIRED', 'MFA_REQUIRED', 'LOGIN_REQUIRED', 'INVALID_PDF', 'CANCELLED', 'SESSION_EXPIRED'].includes(res.state)) return 'failed';
+            if (['FAILED', 'NO_ACCESS', 'CAPTCHA_REQUIRED', 'MFA_REQUIRED', 'LOGIN_REQUIRED', 'INVALID_PDF', 'RESOLUTION_FAILED', 'CANCELLED', 'SESSION_EXPIRED'].includes(res.state)) return 'failed';
             if (safeWebUrl(res.oa_link)) return 'oa';
             return VNU_CONFIGURED ? 'vnu' : 'search';
-        }
-
-        function downloadMethodLabel(method) {
-            return ({ vnu: 'VNU', oa: 'OA', public_copy: 'OA', manual_import: 'nhập tay' })[method] || '';
         }
 
         function sourceResultEntries() {
@@ -992,63 +998,23 @@
             return node;
         }
 
-        const FAILURE_STATES = new Set(['PURCHASE_REQUIRED', 'NO_ACCESS', 'FAILED', 'CAPTCHA_REQUIRED', 'MFA_REQUIRED', 'LOGIN_REQUIRED', 'INVALID_PDF', 'CANCELLED', 'SESSION_EXPIRED']);
-
-        function stateBadgeClass(state) {
-            return ({
-                DOWNLOADED: 'bg-emerald-50 text-emerald-800 border-emerald-200',
-                PROCESSING: 'bg-blue-50 text-blue-800 border-blue-200',
-                OPEN_ACCESS: 'bg-emerald-50 text-emerald-800 border-emerald-200',
-                CANCELLED: 'bg-amber-50 text-amber-900 border-amber-200',
-                CAPTCHA_REQUIRED: 'bg-amber-50 text-amber-900 border-amber-200',
-                MFA_REQUIRED: 'bg-amber-50 text-amber-900 border-amber-200',
-                LOGIN_REQUIRED: 'bg-amber-50 text-amber-900 border-amber-200',
-                SESSION_EXPIRED: 'bg-amber-50 text-amber-900 border-amber-200',
-                PURCHASE_REQUIRED: 'bg-slate-100 text-slate-600 border-slate-200',
-                NO_ACCESS: 'bg-rose-50 text-rose-800 border-rose-200',
-                FAILED: 'bg-rose-50 text-rose-800 border-rose-200',
-                INVALID_DOI: 'bg-rose-50 text-rose-800 border-rose-200',
-                INVALID_PDF: 'bg-rose-50 text-rose-800 border-rose-200',
-                INSTITUTION_ACCESS: 'bg-blue-50 text-blue-800 border-blue-200',
-                AUTHENTICATED: 'bg-blue-50 text-blue-800 border-blue-200'
-            })[state] || 'bg-slate-100 text-slate-700 border-slate-200';
+        function resultRowHandlers(index) {
+            return {
+                openFolder,
+                download: () => downloadAllOA([index]),
+                retry: () => downloadAllOA([index]),
+                exportRis: () => exportSingleRIS(index)
+            };
         }
 
         function renderDownloadFailure(cell, index, state, message, openUrl) {
-            cell.replaceChildren();
-            cell.title = message || '';
-            const openLink = document.createElement('a');
-            openLink.href = safeWebUrl(openUrl || currentResults[index]?.resolved_url || currentResults[index]?.vnu_link) || '#';
-            openLink.target = '_blank';
-            openLink.rel = 'noopener noreferrer';
-            openLink.textContent = 'Mở web';
-            if (state === 'PURCHASE_REQUIRED') {
-                // A paid-only article is an expected outcome, not a download error.
-                cell.className = 'inline-block mr-2 text-xs whitespace-normal max-w-xs';
-                const badge = element('span', '', 'inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-100 text-slate-600 font-medium');
-                badge.innerHTML = '<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>';
-                badge.append('Bài phải mua · không tải được');
-                openLink.className = 'ml-2 text-slate-500 underline underline-offset-2 hover:text-blue-700';
-                cell.append(badge, openLink);
-                return;
-            }
-            cell.className = 'inline-block mr-2 text-xs text-slate-600 whitespace-normal max-w-xs';
-            const retryRowBtn = element('button', 'Thử lại', 'inline-flex items-center gap-1 mr-2 px-2.5 py-1 rounded-md text-[11px] font-semibold bg-blue-600 hover:bg-blue-700 text-white');
-            retryRowBtn.onclick = () => downloadAllOA([index]);
-            openLink.className = 'font-medium text-blue-700 underline underline-offset-2 hover:text-blue-900';
-            const hint = state === 'CAPTCHA_REQUIRED' ? 'Cần xác minh trong trình duyệt, rồi thử lại. ' :
-                state === 'CANCELLED' ? 'Lần tải trước bị gián đoạn. ' :
-                state === 'NO_ACCESS' ? 'Phiên thư viện chưa lấy được PDF. ' :
-                'Chưa tải được tự động. ';
-            cell.append(retryRowBtn, element('span', hint), openLink);
-        }
-
-        function stateLabel(state) {
-            return ({PENDING: 'Chờ tải', PROCESSING: 'Đang xử lý', OPEN_ACCESS: 'Có nguồn Open Access',
-                LOGIN_REQUIRED: 'Cần đăng nhập VNU', AUTHENTICATED: 'Đã đăng nhập', SESSION_EXPIRED: 'Phiên đã hết hạn',
-                INSTITUTION_ACCESS: 'Có quyền toàn văn', NO_ACCESS: 'Chưa có quyền toàn văn', PURCHASE_REQUIRED: 'Phải mua bài', MFA_REQUIRED: 'Cần xác minh MFA',
-                CAPTCHA_REQUIRED: 'Cần xác minh trong trình duyệt', INVALID_DOI: 'DOI không hợp lệ', INVALID_PDF: 'PDF thiếu hoặc không hợp lệ',
-                RESOLUTION_FAILED: 'Chưa resolve được DOI', DOWNLOADED: 'Đã tải', FAILED: 'Chưa tải được', CANCELLED: 'Đã gián đoạn'})[state] || state;
+            const item = currentResults[index] || {};
+            item.state = state;
+            item.message = message || '';
+            if (openUrl) item.resolved_url = openUrl;
+            const route = state === 'PURCHASE_REQUIRED' ? 'purchase' : state === 'INVALID_DOI' ? 'invalid' : 'failed';
+            SlrResearchResults.updateStatus(document.getElementById(`state-cell-${index}`), state, route, message);
+            SlrResearchResults.renderPrimaryAction(cell, item, index, route, state, resultRowHandlers(index));
         }
 
         function displayResults(results) {
@@ -1120,93 +1086,17 @@
                         tbody.appendChild(groupRow);
                         previousSource = provider;
                     }
-                    const tr = element('tr', '', 'result-row hover:bg-slate-50/70 transition-colors');
-                    const name = element('td', res.custom_name, 'p-4 align-top font-mono text-xs break-all text-slate-700');
-                    const info = element('td', '', 'p-4 align-top');
-                    name.dataset.label = 'Tên tệp';
-                    info.dataset.label = 'Bài báo';
-                    
-                    const isFav = isInterestedSource(res);
-                    const srcInfo = KNOWN_SOURCES.find(s => s.id === provider);
-                    const badgeColor = srcInfo ? srcInfo.color : 'bg-slate-100 text-slate-600 border-slate-200';
-                    
-                    const badgeSpan = element('span', '', `inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-md border ${badgeColor}`);
-                    if (isFav) {
-                        const star = element('span', '⭐');
-                        star.title = 'Nguồn quan tâm';
-                        badgeSpan.appendChild(star);
-                    }
-                    badgeSpan.appendChild(document.createTextNode(provider || 'Chưa xác định'));
-                    
-                    const badgeWrapper = element('div', '', 'mt-2');
-                    badgeWrapper.appendChild(badgeSpan);
-                    const route = getDownloadRoute(res);
-                    const routeLabels = {
-                        oa: 'Có link OA', vnu: 'Thử VNU + OA', search: 'Tìm thêm OA',
-                        downloaded: 'Đã có PDF', failed: 'Chưa tải được', purchase: 'Phải mua', invalid: 'DOI lỗi'
-                    };
-                    const routeColors = {
-                        oa: 'bg-emerald-50 text-emerald-700', vnu: 'bg-blue-50 text-blue-700',
-                        search: 'bg-amber-50 text-amber-700', downloaded: 'bg-slate-100 text-slate-700',
-                        failed: 'bg-amber-50 text-amber-800', purchase: 'bg-slate-100 text-slate-500',
-                        invalid: 'bg-rose-50 text-rose-700'
-                    };
-                    const methodLabel = route === 'downloaded' ? downloadMethodLabel(res.download_method) : '';
-                    const routeBadge = element('span', methodLabel ? `${routeLabels[route]} · ${methodLabel}` : routeLabels[route], `ml-1 inline-flex text-[11px] font-semibold px-2 py-0.5 rounded-md ${routeColors[route]}`);
-                    routeBadge.id = `route-badge-${index}`;
-                    routeBadge.title = route === 'oa' ? (res.source || 'Có liên kết PDF công khai; chỉ xác nhận khi tải thành công.') :
-                        route === 'vnu' ? 'Sẽ thử tài khoản VNU; nếu thất bại sẽ tìm nguồn công khai.' : '';
-                    badgeWrapper.appendChild(routeBadge);
-                    if (route === 'oa' && res.source) {
-                        badgeWrapper.appendChild(element('span', res.source, 'ml-1 text-[11px] text-slate-500'));
-                    }
-
-                    info.append(
-                        element('div', res.title || res.doi || res.original, 'font-medium text-slate-800 leading-snug'),
-                        element('div', [res.authors, res.journal, res.year].filter(Boolean).join(' | '), 'text-xs text-slate-500 mt-1'),
-                        element('div', res.doi || res.original, 'text-xs text-slate-400 font-mono mt-0.5'),
-                        badgeWrapper
-                    );
-                        
-                    const code = res.already_exists ? 'DOWNLOADED' : res.state || res.status;
-                    const state = element('td', '', 'p-4 align-top text-xs');
-                    const statePill = element('span', stateLabel(code), `status-pill border ${stateBadgeClass(code)}`);
-                    state.appendChild(statePill);
-                    state.dataset.label = 'Trạng thái';
-                    state.dataset.state = code;
-                    state.id = `state-cell-${index}`;
-                    state.title = res.message || '';
-                    const actions = element('td', '', 'p-4 align-top text-right whitespace-nowrap');
-                    actions.classList.add('result-actions');
-                    actions.dataset.label = 'Thao tác';
-                    const cell = element('div', '', 'inline-block mr-2 text-xs');
-                    cell.id = `action-cell-${index}`;
-                    // Show the saved failure instead of a fresh download button.
-                    const savedFailure = res.doi && !res.already_exists && FAILURE_STATES.has(res.state);
-                    if (savedFailure) {
-                        renderDownloadFailure(cell, index, res.state, res.message, res.resolved_url);
-                    } else if (res.doi) {
-                        const download = element('button', res.already_exists ? 'Đã tải' : 'Tải tự động', 'bg-blue-600 text-white px-3 py-2 rounded-lg font-medium hover:bg-blue-700');
-                        download.onclick = res.already_exists ? openFolder : () => downloadAllOA([index]);
-                        cell.append(download);
-                    }
-                    const url = safeWebUrl(res.resolved_url || res.oa_landing || res.vnu_link || res.oa_link);
-                    if (url && !savedFailure) {
-                        const link = element('a', 'Mở trang bài báo', 'ml-2 text-blue-700 hover:underline font-medium');
-                        link.href = url;
-                        link.target = '_blank';
-                        link.rel = 'noopener noreferrer';
-                        cell.append(link);
-                    }
-                    cell.classList.add('result-action-status');
-                    const ris = element('button', 'RIS', 'bg-violet-50 hover:bg-violet-100 text-violet-700 px-3 py-2 rounded-lg text-xs font-medium transition-colors');
-                    ris.id = `ris-btn-${index}`;
-                    ris.onclick = () => exportSingleRIS(index);
-                    const controls = element('div', '', 'result-controls');
-                    controls.append(cell, ris);
-                    actions.append(controls);
-                    tr.append(name, info, state, actions);
-                    tbody.append(tr);
+                    const code = res.already_exists ? 'DOWNLOADED' : res.state || res.status || 'PENDING';
+                    const route = typeof getDownloadRoute === 'function'
+                        ? getDownloadRoute(res)
+                        : code === 'PURCHASE_REQUIRED' ? 'purchase' : code === 'INVALID_DOI' ? 'invalid' : safeWebUrl(res.oa_link) ? 'oa' : '';
+                    const row = SlrResearchResults.createRow(res, index, {
+                        provider: getPaperProvider(res) || 'Nguồn chưa rõ',
+                        favorite: isInterestedSource(res),
+                        route,
+                        handlers: resultRowHandlers(index)
+                    });
+                    tbody.appendChild(row);
                 });
             }
             const resultsSection = document.getElementById('resultsSection');
@@ -1406,17 +1296,11 @@
                                     currentResults[index].download_method = result.method;
                                     currentResults[index].custom_name = result.filename;
                                     const doneState = document.getElementById(`state-cell-${index}`);
-                                    doneState.replaceChildren(element('span', stateLabel('DOWNLOADED'), `status-pill border ${stateBadgeClass('DOWNLOADED')}`));
-                                    doneState.dataset.state = 'DOWNLOADED';
-                                    cell.textContent = 'Đã tải tự động';
-                                    cell.className = 'text-xs font-medium text-emerald-700';
+                                    SlrResearchResults.updateStatus(doneState, 'DOWNLOADED', 'downloaded');
+                                    SlrResearchResults.renderPrimaryAction(cell, currentResults[index], index, 'downloaded', 'DOWNLOADED', resultRowHandlers(index));
                                 } else {
                                     failCount++;
                                     const failedState = result.state || 'FAILED';
-                                    const failCell = document.getElementById(`state-cell-${index}`);
-                                    failCell.replaceChildren(element('span', stateLabel(failedState), `status-pill border ${stateBadgeClass(failedState)}`));
-                                    failCell.dataset.state = failedState;
-                                    failCell.title = result.message || '';
                                     currentResults[index].state = failedState;
                                     currentResults[index].message = result.message || '';
                                     renderDownloadFailure(cell, index, failedState, result.message, result.open_url);
@@ -1430,18 +1314,6 @@
                                 failCount++;
                                 currentResults[index].state = event.result.state || 'FAILED';
                                 currentResults[index].message = event.result.message || '';
-                            }
-                            const routeBadge = document.getElementById(`route-badge-${index}`);
-                            if (result.success && routeBadge) {
-                                const methodLabel = downloadMethodLabel(result.method);
-                                routeBadge.textContent = methodLabel ? `Đã có PDF · ${methodLabel}` : 'Đã có PDF';
-                                routeBadge.className = 'ml-1 inline-flex text-[11px] font-semibold px-2 py-0.5 rounded-md bg-slate-100 text-slate-700';
-                            } else if (result.state === 'PURCHASE_REQUIRED' && routeBadge) {
-                                routeBadge.textContent = 'Phải mua';
-                                routeBadge.className = 'ml-1 inline-flex text-[11px] font-semibold px-2 py-0.5 rounded-md bg-slate-100 text-slate-500';
-                            } else if (routeBadge && result.state) {
-                                routeBadge.textContent = 'Chưa tải được';
-                                routeBadge.className = 'ml-1 inline-flex text-[11px] font-semibold px-2 py-0.5 rounded-md bg-amber-50 text-amber-800';
                             }
                             updateDownloadRouteCounts();
                             processedCount = event.completed;
@@ -1592,7 +1464,7 @@
             let oldHtml = '';
             if (btn) {
                 oldHtml = btn.innerHTML;
-                btn.innerHTML = `<span class="pulse-loading text-[10px]">Đang lấy...</span>`;
+                btn.innerHTML = '<svg class="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="3" opacity=".25"></circle><path d="M21 12a9 9 0 00-9-9" stroke="currentColor" stroke-width="3" stroke-linecap="round"></path></svg>';
                 btn.disabled = true;
             }
 
@@ -1725,26 +1597,19 @@
                 tdSource.innerHTML = `
                     <span class="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded-full ${isOA ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' : 'bg-indigo-50 text-indigo-700 border border-indigo-100'}">
                         <span class="w-1.5 h-1.5 rounded-full ${isOA ? 'bg-emerald-500' : 'bg-indigo-500'}"></span>
-                        ${isOA ? 'Open Access' : 'VNU Proxy'}
+                        ${isOA ? 'Open Access' : 'License'}
                     </span>
                 `;
 
                 const tdProjectStatus = document.createElement('td');
                 tdProjectStatus.className = "p-4 align-top";
-                if (p.last_uploaded_project) {
-                    tdProjectStatus.innerHTML = `
-                        <div class="inline-flex items-center gap-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 px-2.5 py-1 rounded-lg text-xs font-semibold" title="Đã đẩy lên vào ${p.uploaded_at ? new Date(p.uploaded_at).toLocaleString() : ''}">
-                            <svg class="w-3.5 h-3.5 text-emerald-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"></path></svg>
-                            <span class="truncate max-w-[120px] font-mono">${p.last_uploaded_project}</span>
-                        </div>
-                    `;
-                } else {
-                    tdProjectStatus.innerHTML = `
-                        <span class="inline-flex items-center gap-1 text-[11px] text-slate-400 font-medium bg-slate-50 px-2 py-0.5 rounded border border-slate-200">
-                            Chưa đẩy lên
-                        </span>
-                    `;
-                }
+                const isAiAnalyzed = p.analysis_status === 'DONE';
+                tdProjectStatus.innerHTML = `
+                    <span class="inline-flex items-center gap-1.5 ${isAiAnalyzed ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-slate-50 text-slate-500 border-slate-200'} border px-2.5 py-1 rounded-lg text-xs font-semibold">
+                        <span class="w-1.5 h-1.5 rounded-full ${isAiAnalyzed ? 'bg-emerald-500' : 'bg-slate-400'}"></span>
+                        ${isAiAnalyzed ? 'Đã phân tích AI' : 'Chưa phân tích AI'}
+                    </span>
+                `;
 
                 const tdAction = document.createElement('td');
                 tdAction.className = "p-4 align-top text-right whitespace-nowrap";
@@ -1895,6 +1760,7 @@
         // --- SLR SYSTEM INTEGRATION & REAL UPLOAD LOGIC ---
         let slrProjects = [];
         let selectedProjectId = '';
+        let selectedDestination = 'project';
         let slrConfig = { base_url: 'http://127.0.0.1:5000', has_api_key: false, default_project_id: '' };
 
         async function initSlrIntegration() {
@@ -1941,7 +1807,20 @@
             if (chevron) chevron.classList.remove('rotate-180');
         }
 
+        function selectRepositoryDestination() {
+            selectedDestination = 'repository';
+            selectedProjectId = '';
+            const hiddenSelect = document.getElementById('projectSelect');
+            const manualContainer = document.getElementById('manualProjectContainer');
+            if (hiddenSelect) hiddenSelect.value = '';
+            if (manualContainer) manualContainer.classList.add('hidden');
+            closeProjectDropdown();
+            updateProjectDropdownTrigger('__repository__');
+            updateTargetProjectDisplay('__repository__');
+        }
+
         function selectProjectItem(projId) {
+            selectedDestination = 'project';
             closeProjectDropdown();
             const manualContainer = document.getElementById('manualProjectContainer');
             const hiddenSelect = document.getElementById('projectSelect');
@@ -1980,6 +1859,14 @@
                 titleEl.className = 'font-semibold text-slate-300 text-xs truncate';
                 if (subEl) subEl.classList.add('hidden');
                 if (iconEl) iconEl.innerHTML = '🎯';
+                return;
+            }
+
+            if (projId === '__repository__') {
+                titleEl.textContent = 'Shared Research Repository';
+                titleEl.className = 'font-semibold text-emerald-300 text-xs truncate';
+                if (subEl) { subEl.textContent = 'No project membership'; subEl.classList.remove('hidden'); }
+                if (iconEl) iconEl.innerHTML = 'DB';
                 return;
             }
 
@@ -2140,6 +2027,11 @@
 
         function renderProjectsDropdown() {
             renderProjectsDropdownList();
+            if (selectedDestination === "repository") {
+                updateProjectDropdownTrigger("__repository__");
+                updateTargetProjectDisplay("__repository__");
+                return;
+            }
             if (selectedProjectId) {
                 updateProjectDropdownTrigger(selectedProjectId);
                 updateTargetProjectDisplay(selectedProjectId);
@@ -2160,6 +2052,7 @@
         }
 
         function onManualProjectInput() {
+            selectedDestination = 'project';
             const manualInput = document.getElementById('manualProjectId');
             selectedProjectId = (manualInput.value || '').trim();
             const hiddenSelect = document.getElementById('projectSelect');
@@ -2171,6 +2064,11 @@
         function updateTargetProjectDisplay(projId) {
             const display = document.getElementById('barTargetProject');
             if (!display) return;
+            if (projId === '__repository__') {
+                display.textContent = "Shared Research Repository (no project)";
+                display.className = "font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 text-xs truncate max-w-[280px]";
+                return;
+            }
             if (projId) {
                 const found = slrProjects.find(p => p.id === projId);
                 const name = found ? found.name : projId;
@@ -2189,7 +2087,7 @@
             document.getElementById('cfgDefaultProj').value = slrConfig.default_project_id || '';
             document.getElementById('cfgApiKeyNote').textContent = slrConfig.has_api_key 
                 ? `Đã cấu hình khóa bảo mật bí mật (${slrConfig.api_key_masked || 'Đã kích hoạt'}). Nhập mới nếu muốn thay đổi.` 
-                : 'Chưa có API Key. Vui lòng nhập PUBLIC_UPLOAD_API_KEY.';
+                : 'Chưa có SLR API key. Nhập key được cấp đúng scope.';
             
             const testResult = document.getElementById('testConnResult');
             testResult.classList.add('hidden');
@@ -2326,7 +2224,12 @@
         }
 
         async function startPushToProject() {
-            if (!selectedProjectId) {
+            if (selectedDestination === 'repository' && !slrConfig.has_api_key) {
+                alert('Configure the SLR API key and grant the required permissions to that API client.');
+                openSlrConfigModal();
+                return;
+            }
+            if (selectedDestination === 'project' && !selectedProjectId) {
                 alert('Vui lòng chọn hoặc nhập Dự Án Đích (Target Project) trước khi đẩy bài lên!');
                 const select = document.getElementById('projectSelect');
                 if (select) select.focus();
@@ -2345,7 +2248,7 @@
             const btnClose = document.getElementById('btnCloseUploadModal');
             const btnFinish = document.getElementById('btnFinishUpload');
 
-            document.getElementById('uploadTargetDisplay').textContent = selectedProjectId;
+            document.getElementById('uploadTargetDisplay').textContent = selectedDestination === 'repository' ? 'Shared Research Repository (no project)' : selectedProjectId;
             document.getElementById('uploadStatTotal').textContent = selectedItems.length;
             document.getElementById('uploadStatSuccess').textContent = '0';
             document.getElementById('uploadStatFail').textContent = '0';
@@ -2386,7 +2289,8 @@
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        project_id: selectedProjectId,
+                        project_id: selectedDestination === "project" ? selectedProjectId : null,
+                        destination: selectedDestination,
                         dois: selectedItems.map(p => p.doi)
                     })
                 });
@@ -2445,7 +2349,12 @@
                 const statusP = document.getElementById(`feed-status-${idx}`);
 
                 if (itemDiv && statusP) {
-                    if (evt.success) {
+                    if (evt.outcome === 'partial') {
+                        itemDiv.className = "p-3 rounded-xl border border-amber-200 bg-amber-50/60 flex items-start justify-between gap-3 text-xs transition-all";
+                        if (icon) icon.innerHTML = `<span class="text-amber-600 font-bold">!</span>`;
+                        statusP.className = "text-[11px] text-amber-700 font-medium mt-0.5";
+                        statusP.textContent = evt.message || "PDF đã tải lên nhưng một phần đồng bộ bị lỗi.";
+                    } else if (evt.success) {
                         itemDiv.className = "p-3 rounded-xl border border-emerald-200 bg-emerald-50/60 flex items-start justify-between gap-3 text-xs transition-all";
                         if (icon) icon.innerHTML = `<span class="text-emerald-600 font-bold">✓</span>`;
                         statusP.className = "text-[11px] text-emerald-700 font-medium mt-0.5";
@@ -2466,7 +2375,7 @@
                 const btnFinish = document.getElementById('btnFinishUpload');
                 btnFinish.classList.remove('hidden');
                 btnFinish.textContent = "✓ Hoàn tất & Cập nhật danh sách";
-                showToast(`✓ Đã tải lên ${evt.success_count} bài báo vào dự án ${evt.project_id}!`, true);
+                showToast(`Upload processed: ${evt.success_count} complete, ${evt.fail_count} failed or partial.`, evt.fail_count === 0);
             }
         }
 
@@ -2645,9 +2554,9 @@
                 </div>
 
                 <div>
-                    <label class="block font-semibold text-slate-700 mb-1">Khóa bảo mật Public Upload (X-API-Key)</label>
+                    <label class="block font-semibold text-slate-700 mb-1">SLR API key (X-API-Key)</label>
                     <input type="password" id="cfgApiKey" placeholder="Nhập API Key mới hoặc để trống nếu không đổi" class="w-full text-xs px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 font-mono">
-                    <p class="text-[11px] text-slate-400 mt-1" id="cfgApiKeyNote">Khóa bảo mật khớp với PUBLIC_UPLOAD_API_KEY trong file .env của backend.</p>
+                    <p class="text-[11px] text-slate-400 mt-1" id="cfgApiKeyNote">Một key dùng cho upload theo quyền được cấp: project, phân tích và Kho chung.</p>
                 </div>
 
                 <div>

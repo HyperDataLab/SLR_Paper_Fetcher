@@ -5,7 +5,7 @@ from dotenv import load_dotenv, dotenv_values
 # Tự động load file .env từ thư mục hiện tại
 BASE_DIR = Path(__file__).resolve().parent
 ENV_PATH = Path(os.getenv("APP_ENV_FILE", str(BASE_DIR / ".env"))).expanduser()
-_API_FIELDS = ("ELSEVIER_API_KEY", "ELSEVIER_INST_TOKEN", "OPENALEX_API_KEY", "SLR_API_BASE_URL", "SLR_PUBLIC_API_KEY", "SLR_DEFAULT_PROJECT_ID")
+_API_FIELDS = ("ELSEVIER_API_KEY", "ELSEVIER_INST_TOKEN", "OPENALEX_API_KEY", "SLR_API_BASE_URL", "SLR_PUBLIC_API_KEY", "SLR_DEFAULT_PROJECT_ID", "SLR_REPOSITORY_API_KEY", "SLR_API_KEY")
 _API_ENV_DEFAULTS = {key: os.getenv(key, "") for key in _API_FIELDS}
 load_dotenv(dotenv_path=ENV_PATH)
 
@@ -18,6 +18,8 @@ class Settings:
     SLR_API_BASE_URL: str = os.getenv("SLR_API_BASE_URL", "http://127.0.0.1:5000").rstrip("/")
     SLR_PUBLIC_API_KEY: str = os.getenv("SLR_PUBLIC_API_KEY", "slr-public-upload-api-key-2026-secret").strip()
     SLR_DEFAULT_PROJECT_ID: str = os.getenv("SLR_DEFAULT_PROJECT_ID", "").strip()
+    SLR_REPOSITORY_API_KEY: str = os.getenv("SLR_REPOSITORY_API_KEY", "").strip()
+    SLR_API_KEY: str = os.getenv("SLR_API_KEY", "").strip() or SLR_REPOSITORY_API_KEY or SLR_PUBLIC_API_KEY
 
     # Local document analysis services. Ollama is the default AI provider.
     GROBID_URL: str = os.getenv("GROBID_URL", "http://127.0.0.1:8070").rstrip("/")
@@ -32,6 +34,7 @@ class Settings:
         values = dotenv_values(ENV_PATH) if ENV_PATH.exists() else {}
         for key in _API_FIELDS:
             setattr(self, key, (values.get(key, _API_ENV_DEFAULTS[key]) or "").strip())
+        self.SLR_API_KEY = (values.get("SLR_API_KEY") or values.get("SLR_REPOSITORY_API_KEY") or values.get("SLR_PUBLIC_API_KEY") or _API_ENV_DEFAULTS.get("SLR_API_KEY") or "").strip()
         if self.SLR_API_BASE_URL:
             self.SLR_API_BASE_URL = self.SLR_API_BASE_URL.rstrip("/")
     # Unpaywall API

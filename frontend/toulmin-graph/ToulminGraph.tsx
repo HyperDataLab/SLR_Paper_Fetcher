@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import type { MouseEvent as ReactMouseEvent } from 'react';
-import { Background, BackgroundVariant, Controls, ReactFlow, ReactFlowProvider, useReactFlow } from '@xyflow/react';
+import { Background, BackgroundVariant, Controls, MiniMap, ReactFlow, ReactFlowProvider, useReactFlow } from '@xyflow/react';
 import type { ToulminFlowEdge, ToulminFlowNode, ToulminGraphPayload, ToulminInteractionApi } from './types/toulmin.types';
 import { useToulminGraph } from './hooks/useToulminGraph';
 import { useAutoLayout } from './hooks/useAutoLayout';
@@ -124,8 +124,8 @@ function GraphCanvas({ payload }: { payload: ToulminGraphPayload }) {
         panOnDrag
         zoomOnScroll
         zoomOnPinch
-        minZoom={0.16}
-        maxZoom={1.6}
+        minZoom={0.2}
+        maxZoom={1.8}
         // These role cards start at the same provisional position until ELK resolves.
         // Keep them mounted so React Flow measures every card before the first fit.
         onlyRenderVisibleElements={false}
@@ -135,7 +135,18 @@ function GraphCanvas({ payload }: { payload: ToulminGraphPayload }) {
         aria-label="Interactive Toulmin graph. Drag nodes to reposition. Use the mouse wheel to zoom and drag the canvas to pan."
       >
         <Background variant={BackgroundVariant.Dots} gap={22} size={1} color="#d8e0e7" />
-        <Controls showInteractive={false} position="bottom-right" />
+        <MiniMap
+          pannable
+          zoomable
+          position="bottom-left"
+          nodeColor={(node) => {
+            const role = (node as ToulminFlowNode).data.role;
+            return role === 'claim' ? '#318c70' : role === 'rebuttal' ? '#be5a5a' : role === 'qualifier' ? '#ca8a28' : role === 'backing' ? '#84919a' : '#0071bc';
+          }}
+          className="toulmin-flow-minimap"
+          aria-label="Navigate Toulmin argument graph"
+        />
+        <Controls showInteractive={false} position="top-right" />
         <ToulminGraphToolbar nodes={graph.nodes} activeNodeId={activeNavigatorNodeId} onAutoLayout={graph.autoLayout} onFitView={fit} onSelectNode={onNavigateNode} />
       </ReactFlow>
       {layoutError ? <div className="toulmin-flow-error" role="alert">Layout failed: {layoutError}</div> : null}

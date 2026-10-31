@@ -11,4 +11,5 @@ python-dotenv
 beautifulsoup4
 playwright
 lxml
+pypdf
 xlrd

@@ -10,7 +10,7 @@
     </button>
   </div>
   <div class="flex-1 overflow-y-auto px-3 py-5">
-    <p class="mb-2 px-3 text-xs font-medium text-slate-500">Menu</p>
+    <p class="mb-2 px-3 text-[11px] font-semibold text-slate-500">Workspace</p>
     <nav aria-label="Main navigation" class="space-y-1.5">
       <a id="navTabFetch" href="/" {% if sidebar_workspace_mode|default(false) %}onclick="switchTab(event, 'fetch')"{% endif %} {% if sidebar_active_tab == 'fetch' %}aria-current="page"{% endif %} class="flex items-center gap-3 rounded-xl px-3.5 py-2.5 text-xs font-semibold transition-all {% if sidebar_active_tab == 'fetch' %}border border-blue-100/80 bg-blue-50 font-bold text-blue-700 shadow-sm shadow-blue-500/5{% else %}text-slate-600 hover:bg-slate-100/70 hover:text-slate-900{% endif %}">
         <span id="navIconFetch" class="flex h-7 w-7 items-center justify-center rounded-lg {% if sidebar_active_tab == 'fetch' %}bg-blue-600 text-white shadow-sm shadow-blue-500/20{% else %}bg-slate-100 text-slate-500{% endif %}" aria-hidden="true"><svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg></span>
@@ -27,7 +27,7 @@
       </a>
     </nav>
     <section class="mt-6" aria-label="Shortcuts">
-      <p class="mb-2 px-3 text-xs font-medium text-slate-500">Shortcuts</p>
+      <p class="mb-2 px-3 text-[11px] font-semibold text-slate-500">Preferences</p>
       <div class="space-y-1">
         {% if sidebar_show_utilities|default(false) %}
         <button type="button" onclick="restoreSavedResults()" class="flex w-full items-center gap-3 rounded-xl px-3.5 py-2.5 text-left text-xs font-medium text-slate-600 transition-all hover:bg-slate-100/70 hover:text-slate-900"><span class="flex h-7 w-7 items-center justify-center rounded-lg bg-slate-100 text-slate-500" aria-hidden="true"><svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 014.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg></span><span>Restore saved list</span></button>

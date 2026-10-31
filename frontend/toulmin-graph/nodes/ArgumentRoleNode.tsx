@@ -1,9 +1,17 @@
 import { memo, useLayoutEffect } from 'react';
 import { Handle, Position, useUpdateNodeInternals, type NodeProps } from '@xyflow/react';
+import ResearchGraphNodeCard, { type ResearchGraphTone } from '../../graph-shared/ResearchGraphNodeCard';
 import type { ToulminFlowNode, ToulminNodeData, ToulminNodeType } from '../types/toulmin.types';
 
-const handleStyle = { opacity: 0, width: 7, height: 7, background: 'currentColor', border: 0 };
 type RoleNodeProps = NodeProps<ToulminFlowNode> & { role: ToulminNodeType };
+
+function toneForRole(role: ToulminNodeType): ResearchGraphTone {
+  if (role === 'claim') return 'success';
+  if (role === 'rebuttal') return 'danger';
+  if (role === 'qualifier') return 'warning';
+  if (role === 'backing') return 'neutral';
+  return 'primary';
+}
 
 function AllSideHandles({ role, data }: { role: ToulminNodeType; data: ToulminNodeData }) {
   const handles: Array<{ id: string; type: 'source' | 'target'; position: Position; style?: React.CSSProperties }> = [];
@@ -16,7 +24,6 @@ function AllSideHandles({ role, data }: { role: ToulminNodeType; data: ToulminNo
   } else if (role === 'claim') {
     for (let index = 0; index < (data.groundPortCount || 0); index++) {
       handles.push({ id: `in-ground-${index}`, type: 'target', position: Position.Left, style: { top: `${((index + 1) / ((data.groundPortCount || 0) + 1)) * 55}%` } });
-      // Inner Grounds route around the lower roles and enter at distinct right-side ports.
       handles.push({ id: `in-ground-outer-${index}`, type: 'target', position: Position.Right, style: { top: `${20 + ((index + 1) / ((data.groundPortCount || 0) + 1)) * 60}%` } });
     }
     handles.push({ id: 'in-left', type: 'target', position: Position.Left });
@@ -33,7 +40,7 @@ function AllSideHandles({ role, data }: { role: ToulminNodeType; data: ToulminNo
   } else if (role === 'rebuttal') {
     handles.push({ id: 'out-top', type: 'source', position: Position.Top }, { id: 'out-right', type: 'source', position: Position.Right });
   }
-  return <>{handles.map((handle) => <Handle key={handle.id} id={handle.id} type={handle.type} position={handle.position} isConnectable={false} style={{ ...handleStyle, ...handle.style }} />)}</>;
+  return <>{handles.map((handle) => <Handle key={handle.id} id={handle.id} type={handle.type} position={handle.position} isConnectable={false} style={{ ...handle.style, opacity: 0, width: 7, height: 7, background: 'currentColor', border: 0 }} />)}</>;
 }
 
 function ArgumentRoleNode({ id, data, selected, role }: RoleNodeProps) {
@@ -41,20 +48,20 @@ function ArgumentRoleNode({ id, data, selected, role }: RoleNodeProps) {
   useLayoutEffect(() => {
     updateNodeInternals(id);
   }, [id, updateNodeInternals, data.groundPortCount, data.warrantPortCount, data.backingPortCount, data.qualifierPortCount, data.rebuttalPortCount]);
-  return (
-    <article className={`toulmin-node toulmin-node--${role}${selected ? ' is-selected' : ''}`} aria-label={`${data.label}: ${data.text}`}>
-      <AllSideHandles role={role} data={data} />
-      <header className="toulmin-node__header">
-        <span className="toulmin-node__title">{data.label}</span>
-        <span className={`toulmin-node__status toulmin-node__status--${data.reviewStatus.toLowerCase().replaceAll('_', '-')}`}>{data.reviewStatus.replaceAll('_', ' ')}</span>
-      </header>
-      <p className="toulmin-node__content">{data.text}</p>
-      <footer className="toulmin-node__footer">
-        <span>{data.origin === 'inferred' ? 'AI reconstructed' : data.origin === 'hypothetical' ? 'Hypothetical' : 'Explicit source'}</span>
-        {data.sourceReference?.page ? <span>Page {String(data.sourceReference.page)}</span> : null}
-      </footer>
-    </article>
-  );
+
+  const origin = data.origin === 'inferred' ? 'AI reconstructed' : data.origin === 'hypothetical' ? 'Hypothetical' : 'Explicit source';
+  const page = data.sourceReference?.page ? `Page ${String(data.sourceReference.page)}` : undefined;
+  return <ResearchGraphNodeCard
+    role={data.label.split('·')[0].trim()}
+    text={data.text}
+    status={data.reviewStatus}
+    origin={origin}
+    note={page}
+    tone={toneForRole(role)}
+    selected={selected}
+  >
+    <AllSideHandles role={role} data={data} />
+  </ResearchGraphNodeCard>;
 }
 
 export default memo(ArgumentRoleNode);

@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
-import { Background, BackgroundVariant, Controls, ReactFlow, ReactFlowProvider, useReactFlow } from '@xyflow/react';
+import { Background, BackgroundVariant, Controls, MiniMap, ReactFlow, ReactFlowProvider, useReactFlow } from '@xyflow/react';
 import type { AifFlowEdge, AifFlowNode, AifGraphControls, AifGraphPayload } from './types/aif.types';
 import { useAifGraph } from './hooks/useAifGraph';
 import { useAifLayout } from './hooks/useAifLayout';
@@ -15,6 +15,8 @@ const nodeTypes = { information: InformationNode, inference: InferenceNode, conf
 const edgeTypes = { aif: AifEdge };
 
 function GraphCanvas({ payload }: { payload: AifGraphPayload }) {
+  const isCraft = payload.view === 'craft';
+  const viewLabel = isCraft ? 'Craft argument map' : 'AIF argument graph';
   const graph = useAifGraph(payload);
   const [focusedNodeId, setFocusedNodeId] = useState<string | null>(payload.focusedNodeId || null);
   const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
@@ -41,7 +43,7 @@ function GraphCanvas({ payload }: { payload: AifGraphPayload }) {
   } })), [activeNodeId, connected, graph.edges]);
   const fit = useCallback(() => {
     const nodesToFit = graph.nodes.length > 36 ? getFocusNodes(graph.nodes, graph.edges, focusedNodeId || payload.focusedNodeId) : graph.nodes;
-    void fitView({ nodes: nodesToFit, padding: 0.18, duration: 180 });
+    void fitView({ nodes: nodesToFit, padding: 0.22, duration: 180 });
   }, [fitView, focusedNodeId, graph.edges, graph.nodes, payload.focusedNodeId]);
   const relayout = useCallback(() => { graph.autoLayout(); }, [graph.autoLayout]);
 
@@ -53,10 +55,10 @@ function GraphCanvas({ payload }: { payload: AifGraphPayload }) {
   }, [fit, payload.view, relayout, zoomIn, zoomOut]);
 
   useEffect(() => {
-    const onLayoutError = (event: Event) => setLayoutError(String((event as CustomEvent<string>).detail || 'AIF layout failed.'));
+    const onLayoutError = (event: Event) => setLayoutError(String((event as CustomEvent<string>).detail || `${viewLabel} layout failed.`));
     window.addEventListener('aif-layout-error', onLayoutError);
     return () => window.removeEventListener('aif-layout-error', onLayoutError);
-  }, []);
+  }, [viewLabel]);
 
   const onNodeClick = useCallback((_event: React.MouseEvent, node: AifFlowNode) => {
     setFocusedNodeId(node.id);
@@ -74,27 +76,40 @@ function GraphCanvas({ payload }: { payload: AifGraphPayload }) {
     window.dispatchEvent(new CustomEvent(eventName, { detail: { zoom: viewport.zoom, interactive: !isLayingOut } }));
   }, [isLayingOut, payload.view]);
   const onEdgeClick = useCallback((_event: React.MouseEvent, edge: AifFlowEdge) => {
-    window.onAifEdgeSelected?.(edge.data.originalEdge);
-  }, []);
+    if (payload.view !== 'craft') window.onAifEdgeSelected?.(edge.data.originalEdge);
+  }, [payload.view]);
   const onPaneClick = useCallback(() => { setFocusedNodeId(null); setHoveredNodeId(null); }, []);
 
-  return <div className="aif-flow-shell" aria-label={payload.view === 'craft' ? 'Craft of Research argument graph' : 'AIF argument graph'}>
+  return <div className="aif-flow-shell" aria-label={viewLabel}>
     <ReactFlow<AifFlowNode, AifFlowEdge>
       nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes}
       onNodesChange={graph.onNodesChange} onEdgesChange={graph.onEdgesChange}
       onNodeClick={onNodeClick} onNodeDoubleClick={onNodeDoubleClick} onNodeMouseEnter={onNodeMouseEnter} onNodeMouseLeave={onNodeMouseLeave}
       onEdgeClick={onEdgeClick} onPaneClick={onPaneClick} onMove={onMove}
       nodesDraggable nodesConnectable={false} elementsSelectable edgesFocusable nodesFocusable
-      panOnDrag zoomOnScroll zoomOnPinch minZoom={0.08} maxZoom={1.8} onlyRenderVisibleElements={graph.nodes.length > 300 && !isLayingOut}
+      panOnDrag zoomOnScroll zoomOnPinch minZoom={0.2} maxZoom={1.8} onlyRenderVisibleElements={graph.nodes.length > 300 && !isLayingOut}
       deleteKeyCode={null} proOptions={{ hideAttribution: true }} className="aif-flow"
-      aria-label="Interactive AIF graph. Drag nodes to reposition. Use the mouse wheel to zoom and drag the canvas to pan."
+      aria-label={`Interactive ${viewLabel.toLowerCase()}. Drag elements to reposition. Use the mouse wheel to zoom and drag the canvas to pan.`}
     >
       <Background variant={BackgroundVariant.Dots} gap={22} size={1} color="#d8e0e7" />
-      <Controls showInteractive={false} position="bottom-right" />
+      <MiniMap
+        pannable
+        zoomable
+        nodeColor={(node) => {
+          const graphNode = node as AifFlowNode;
+          if (graphNode.type === 'inference') return '#0071bc';
+          if (graphNode.type === 'conflict') return '#c2414b';
+          if (graphNode.type === 'preference') return '#7952a8';
+          return graphNode.data.informationRole === 'conclusion' ? '#117035' : '#4f86b5';
+        }}
+        className="aif-flow-minimap"
+        aria-label={`Navigate ${viewLabel.toLowerCase()}`}
+      />
+      <Controls showInteractive={false} position="top-right" />
     </ReactFlow>
-    {isLayingOut ? <div className="aif-flow-loading" role="status">Arranging AIF graph…</div> : null}
+    {isLayingOut ? <div className="aif-flow-loading" role="status">Arranging {viewLabel.toLowerCase()}…</div> : null}
     {layoutError ? <div className="aif-flow-warning" role="alert">Automatic layout failed: {layoutError}</div> : null}
-    {graph.droppedEdgeIds.length ? <div className="aif-flow-warning" role="status">{graph.droppedEdgeIds.length} relationship(s) refer to missing AIF nodes and were omitted from this view.</div> : null}
+    {graph.droppedEdgeIds.length ? <div className="aif-flow-warning" role="status">{graph.droppedEdgeIds.length} link(s) refer to missing {isCraft ? 'argument elements' : 'AIF nodes'} and were omitted from this view.</div> : null}
   </div>;
 }
 

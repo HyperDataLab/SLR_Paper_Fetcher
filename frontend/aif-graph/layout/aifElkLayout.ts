@@ -10,10 +10,8 @@ async function getElk(): Promise<ElkInstance> {
 
 function dimensions(node: AifFlowNode) {
   const width = node.measured?.width || node.data.width;
-  const text = node.data.text || '';
-  const estimatedLines = text.split('\n').reduce((sum, line) => sum + Math.max(1, Math.ceil(line.length / 34)), 0);
-  const estimatedHeight = node.type === 'information' ? Math.max(104, 80 + Math.min(estimatedLines, 4) * 18) : node.type === 'inference' ? node.data.width : 98;
-  return { width, height: node.measured?.height || estimatedHeight };
+  const height = node.measured?.height || (node.type === 'information' ? 110 : node.type === 'inference' ? 136 : 166);
+  return { width, height };
 }
 
 function portsFor(node: AifFlowNode): ElkPort[] {

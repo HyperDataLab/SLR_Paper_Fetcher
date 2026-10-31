@@ -29,7 +29,7 @@ function ToulminGraphToolbar({ nodes, activeNodeId, onAutoLayout, onFitView, onS
           </button>
         ))}
       </Panel>
-      <Panel position="top-right" className="toulmin-flow-toolbar">
+      <Panel position="bottom-right" className="toulmin-flow-toolbar">
         <button type="button" onClick={onAutoLayout} title="Recalculate automatic layout">Auto layout</button>
         <button type="button" onClick={onFitView} title="Center the complete argument graph">Center graph</button>
       </Panel>

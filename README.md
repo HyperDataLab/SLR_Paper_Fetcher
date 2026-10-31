@@ -50,11 +50,14 @@ flowchart LR
     R[👩‍🔬 Nhà nghiên cứu] --> A[SLR Paper Fetcher]
     A --> S[🔎 Nguồn bài báo]
     A --> G[GROBID<br/>Trích xuất toàn văn]
-    A --> O[Ollama<br/>AI cục bộ]
-    A -. tùy chọn .-> M[Gemini API]
+    G --> F[Full-text mapping JSON<br/>Sections + offsets + pages]
+    F --> O[Ollama<br/>AI cục bộ]
+    F -. tùy chọn .-> M[Gemini API]
     A --> D[(SQLite và PDF)]
     A --> V[VNU / OpenAthens<br/>Tùy cấu hình]
 ```
+
+Trước khi gọi AI, GROBID tạo file `<tên-PDF>.fulltext.json` cạnh PDF. Pipeline đọc lại file này, kiểm tra toàn bộ section, offsets và độ dài văn bản; nếu GROBID chỉ trả về văn bản một phần hoặc mapping không hợp lệ thì dừng phân tích. Các section được chia thành chunk nhưng gửi đủ toàn văn; bản nháp được tổng hợp sau khi xử lý hết chunk.
 
 <a id="docker"></a>
 ## 🐳 Cài và chạy bằng Docker
@@ -188,7 +191,7 @@ Mở **[http://127.0.0.1:8543](http://127.0.0.1:8543)**. GROBID và Ollama là c
 | `APP_HOST`, `APP_PORT` | `127.0.0.1`, `8543` | Host và cổng khi chạy native. |
 | `DOWNLOAD_FOLDER` | `./downloads` | Nơi lưu PDF khi chạy native. |
 | `SLR_API_BASE_URL` | `http://127.0.0.1:5000` | Địa chỉ SLR System. |
-| `SLR_PUBLIC_API_KEY`, `SLR_DEFAULT_PROJECT_ID` | Theo cấu hình | API key và dự án mặc định của SLR System. |
+| `SLR_API_KEY`, `SLR_DEFAULT_PROJECT_ID` | Theo cấu hình | Một API client key của SLR; quyền project/kho/phân tích được quyết định bằng scope và project ID được cấp. |
 
 Trong Docker Compose, web app truy cập GROBID tại `http://grobid:8070` và Ollama tại `http://ollama:11434`. Các giá trị AI trong **Settings** được lưu trong volume `app-data` và giữ nguyên sau khi container khởi động lại.
 

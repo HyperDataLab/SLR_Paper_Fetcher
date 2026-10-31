@@ -27,7 +27,7 @@ function visualNodeId(role: ToulminRole, sourceId: string, used: Set<string>): s
 function makeRoleNode(role: ToulminRole, item: ToulminComponentItem, source: AifGraphNode, card: ToulminCard, used: Set<string>): ToulminFlowNode {
   const metadata = source.metadata || {};
   return {
-    id: visualNodeId(role, source.id, used), type: role, position: { x: 0, y: 0 }, draggable: true, style: { width: 284 },
+    id: visualNodeId(role, source.id, used), type: role, position: { x: 0, y: 0 }, draggable: true, style: { width: 252, height: 110 },
     data: {
       role, label: ROLE_LABELS[role], text: item.text || source.text || '', fullText: item.text || source.text || '',
       sourceNodeId: source.id, propositionId: item.proposition_id, relationId: source.relation_id || card.relation_id,

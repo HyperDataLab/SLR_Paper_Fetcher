@@ -1,8 +1,9 @@
+@import "../graph-shared/research-graph-node.css";
 #toulminGraphRoot{position:absolute;inset:0;min-width:0;min-height:0;background:#f8fafc}
 .toulmin-flow-shell,.toulmin-flow{width:100%;height:100%;min-width:0;min-height:0}
 .toulmin-flow{background:#f8fafc;color:#1e293b;font-family:Inter,system-ui,sans-serif}
 .toulmin-flow .react-flow__pane{cursor:grab}.toulmin-flow .react-flow__pane:active{cursor:grabbing}
-.toulmin-flow .react-flow__node{width:284px;border:0;background:transparent;padding:0;color:inherit;box-shadow:none}
+.toulmin-flow .react-flow__node{width:252px;border:0;background:transparent;padding:0;color:inherit;box-shadow:none}
 .toulmin-node{position:relative;box-sizing:border-box;width:100%;min-height:112px;border:1px solid var(--role-border);border-radius:9px;background:var(--role-surface);padding:11px 13px 9px;color:#243144;transition:border-color .14s ease,background-color .14s ease,box-shadow .14s ease}
 .toulmin-node:hover{border-color:var(--role-accent);background:var(--role-hover)}
 .toulmin-node.is-selected,.react-flow__node.selected .toulmin-node{border-color:var(--role-accent);background:var(--role-hover);box-shadow:0 0 0 2px color-mix(in srgb,var(--role-accent) 24%,transparent)}
@@ -56,6 +57,8 @@
 .toulmin-flow-navigation button:focus-visible{outline:2px solid #4f46e5;outline-offset:-3px}
 .toulmin-flow-navigation__index{display:inline-grid;width:20px;height:18px;place-items:center;border-radius:4px;background:#eef3f9;color:#3e5a79;font-size:10px;font-weight:700}
 .toulmin-flow-navigation__index--claim{background:#eeecff;color:#4f46e5}
-.toulmin-flow-toolbar{top:7px;right:8px;border:0;background:transparent;padding:0;box-shadow:none}
-@media(max-width:720px){.toulmin-flow .react-flow__node{width:min(284px,76vw)}.toulmin-node{padding:9px 10px}.toulmin-flow-navigation{max-width:100%;right:8px;top:6px}.toulmin-flow-toolbar{top:auto;right:8px;bottom:8px}.toulmin-flow-toolbar button{min-height:36px}.toulmin-flow .react-flow__controls{bottom:54px!important}}
+.toulmin-flow-toolbar{border:0;background:transparent;padding:0;box-shadow:none}
+.toulmin-flow .react-flow__minimap{overflow:hidden;border:1px solid #d4dde6;border-radius:8px;background:#fff;box-shadow:0 2px 8px rgb(18 35 49 / .08)}
+.toulmin-flow .react-flow__controls{overflow:hidden;border:1px solid #d4dde6;border-radius:8px;background:#fff;box-shadow:0 2px 8px rgb(18 35 49 / .08)}
+@media(max-width:720px){.toulmin-flow .react-flow__node{width:min(252px,76vw)}.toulmin-flow-navigation{max-width:calc(100% - 100px);right:8px;top:6px}.toulmin-flow-toolbar{right:8px;bottom:8px}.toulmin-flow-toolbar button{min-height:36px}.toulmin-flow .react-flow__controls{top:48px!important;bottom:auto!important}.toulmin-flow .react-flow__minimap{width:112px;height:76px}}
 @media(prefers-reduced-motion:reduce){.toulmin-node,.toulmin-flow .react-flow__node.is-muted{transition:none}.toulmin-flow-toolbar button{transition:none}}
