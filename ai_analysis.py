@@ -1723,6 +1723,7 @@ def _normalize_proposition_output(item):
 
 
 def _extract_propositions(document, provider, model, pdf_pages=None, pdf_artifact=None):
+    markdown_source = document.get("metadata", {}).get("source_kind") == "markdown"
     chunks = _section_chunks(document)
     propositions, rejected, index = [], [], 0
     section_map = {}
@@ -1748,25 +1749,28 @@ def _extract_propositions(document, provider, model, pdf_pages=None, pdf_artifac
             grobid_page = next((page_span.get("page") for page_span in section.get("provenance", {}).get("page_spans", [])
                                 if page_span["start"] <= section.get("chunk_start", 0) + start < page_span["end"]),
                                section.get("page"))
-            pdf_anchor = _find_pdf_quote_span(pdf_pages or (), grobid_quote, grobid_page)
-            if not pdf_anchor:
+            pdf_anchor = None if markdown_source else _find_pdf_quote_span(pdf_pages or (), grobid_quote, grobid_page)
+            if not markdown_source and not pdf_anchor:
                 rejected.append({"index": index, "reason": "quote_not_verified_in_source_pdf" if pdf_pages else "pdf_text_unavailable"})
                 continue
-            # Displayed component wording comes from the exact matching PDF text-layer span.
-            source_quote = pdf_anchor["quote"]
+            # Markdown evidence is anchored directly to the exact source-text slice; it has no page number.
+            source_quote = grobid_quote if markdown_source else pdf_anchor["quote"]
             text = source_quote
             base = section["start_offset"] + section.get("chunk_start", 0)
             propositions.append({"id": f"p-{uuid.uuid4().hex[:12]}", "paper_id": "", "section_id": section["id"],
                 "text": text, "normalized_text": " ".join(text.lower().split()), "proposition_type": kind,
                 "argumentative_roles": [], "source_quote": source_quote,
-                "source_page": pdf_anchor["page"],
+                "source_page": None if markdown_source else pdf_anchor["page"],
                 "source_offsets": {"start": base + start, "end": base + end}, "is_inferred": False,
                 "confidence": _clamp_confidence(item.get("confidence")), "extraction_model": model,
                 "prompt_version": PROMPT_VERSIONS["scientific_proposition_extraction"], "assertion_origin": "source", "review_status": "pending",
-                "provenance": {"justification": str(item.get("justification") or ""), "source": "grobid_full_text_verified_against_pdf",
+                "provenance": {"justification": str(item.get("justification") or ""),
+                    "source": "markdown_character_span" if markdown_source else "grobid_full_text_verified_against_pdf",
                     "grobid_source_quote": grobid_quote,
-                    "pdf_anchor": {"page": pdf_anchor["page"], "start_offset": pdf_anchor["start_offset"],
-                        "end_offset": pdf_anchor["end_offset"], "pdf_sha256": (pdf_artifact or {}).get("sha256")},
+                    **({"markdown_anchor": {"start_offset": base + start, "end_offset": base + end,
+                        "source_markdown_sha256": document.get("metadata", {}).get("source_markdown", {}).get("sha256")}}
+                       if markdown_source else {"pdf_anchor": {"page": pdf_anchor["page"], "start_offset": pdf_anchor["start_offset"],
+                        "end_offset": pdf_anchor["end_offset"], "pdf_sha256": (pdf_artifact or {}).get("sha256")}}),
                     "model": model, "prompt_version": PROMPT_VERSIONS["scientific_proposition_extraction"]}})
     return propositions, rejected, model
 
@@ -1965,6 +1969,14 @@ def _source_reference(proposition):
     figure = reference(r"\b(?:figure|fig\.?)\s+([0-9]+[A-Za-z]?)\b")
     algorithm = reference(r"\b(?:algorithm|alg\.?)\s+([0-9]+[A-Za-z]?)\b")
     theorem = reference(r"\b(?:theorem|thm\.?)\s+([0-9]+[A-Za-z]?)\b")
+    markdown_anchor = (proposition.get("provenance") or {}).get("markdown_anchor") or {}
+    markdown_location_complete = bool(
+        quote and isinstance(offsets, dict)
+        and offsets.get("start") is not None and offsets.get("end") is not None
+        and markdown_anchor.get("start_offset") == offsets.get("start")
+        and markdown_anchor.get("end_offset") == offsets.get("end")
+        and markdown_anchor.get("source_markdown_sha256")
+    )
     return {"proposition_id": proposition.get("id"), "section_id": proposition.get("section_id"),
             "page": proposition.get("source_page"),
             "start_offset": offsets.get("start") if isinstance(offsets, dict) else None,
@@ -1975,7 +1987,8 @@ def _source_reference(proposition):
             "cell": reference(r"\bcell\s+([A-Za-z0-9][A-Za-z0-9-]*)\b"),
             "pdf_anchor": {"page": pdf_anchor.get("page"), "start_offset": pdf_anchor.get("start_offset"),
                 "end_offset": pdf_anchor.get("end_offset"), "pdf_sha256": pdf_anchor.get("pdf_sha256")},
-            "location_complete": bool(quote and pdf_anchor.get("page") and
+            "markdown_anchor": markdown_anchor or None,
+            "location_complete": markdown_location_complete or bool(quote and pdf_anchor.get("page") and
                 pdf_anchor.get("start_offset") is not None and pdf_anchor.get("end_offset") is not None and
                 pdf_anchor.get("pdf_sha256"))}
 
@@ -3195,9 +3208,16 @@ def _run_argument_analysis(doi, document, provider, stage_callback=None, pdf_pag
     validation["source_component_count"] = len(source_propositions)
     validation["source_component_texts_match_quotes"] = all(
         item.get("source_quote") and item.get("text") == item.get("source_quote") for item in source_propositions)
-    validation["source_components_verified_in_pdf"] = all(
-        item.get("provenance", {}).get("pdf_anchor", {}).get("pdf_sha256") == pdf_artifact.get("sha256")
-        for item in source_propositions)
+    if document.get("metadata", {}).get("source_kind") == "markdown":
+        full_text = document.get("text", "")
+        validation["source_components_verified_in_markdown"] = all(
+            0 <= item.get("source_offsets", {}).get("start", -1) <= item.get("source_offsets", {}).get("end", -1) <= len(full_text)
+            and full_text[item["source_offsets"]["start"]:item["source_offsets"]["end"]] == item.get("source_quote")
+            for item in source_propositions)
+    else:
+        validation["source_components_verified_in_pdf"] = all(
+            item.get("provenance", {}).get("pdf_anchor", {}).get("pdf_sha256") == pdf_artifact.get("sha256")
+            for item in source_propositions)
     validation["human_review_required"] = True
     validation["scientific_validity_assessed"] = False
     return {"id": str(uuid.uuid4()), "doi": doi, "provider": provider,
@@ -3248,3 +3268,104 @@ def analyze_pdf(doi: str, pdf_path: str, provider: str, stage_callback=None) -> 
         raise ValueError("The source PDF changed during analysis; discard this run and analyze the current PDF again.")
     return {"doi": doi, "grobid": grobid_metadata, "analysis": draft,
             "document": document, "argumentation": argumentation}, argumentation.get("model") or model
+
+
+def analyze_markdown(doi: str, markdown_path: str, provider: str, stage_callback=None) -> dict:
+    """Analyze supplied Markdown and anchor every source quote to its exact character span."""
+    provider = (provider or "ollama").strip().lower()
+    if provider not in {"ollama", "gemini"}:
+        raise ValueError("Invalid AI provider.")
+    path = Path(markdown_path)
+    # Preserve CRLF/LF exactly so stored offsets point into the original uploaded bytes.
+    with path.open("r", encoding="utf-8", newline="") as source_file:
+        raw = source_file.read()
+    if not raw.strip():
+        raise ValueError("The Markdown source is empty.")
+    source_bytes = path.read_bytes()
+    source_identity = {"file_name": path.name, "sha256": hashlib.sha256(source_bytes).hexdigest(),
+                       "size_bytes": len(source_bytes), "character_count": len(raw)}
+    headings = list(re.finditer(r"(?m)^#{1,6}[ \t]+[^\r\n]+", raw))
+    starts = [0]
+    starts.extend(match.start() for match in headings if match.start() > 0)
+    starts = sorted(set(starts))
+    sections, structure = [], []
+    for index, start in enumerate(starts):
+        end = starts[index + 1] if index + 1 < len(starts) else len(raw)
+        text = raw[start:end]
+        heading_match = re.match(r"#{1,6}[ \t]+([^\r\n]+)", text)
+        heading = heading_match.group(1).strip() if heading_match else ("Introduction" if index == 0 and headings else "")
+        section_id = f"md_sec_{len(sections) + 1:04d}"
+        structure_id = f"md_structure_{len(structure) + 1:04d}"
+        paragraphs = []
+        paragraph_pattern = re.compile(r"(?m)\S(?:[^\r\n]*\r?\n(?![ \t]*\r?\n)[^\r\n]*)*")
+        for paragraph_index, paragraph in enumerate(paragraph_pattern.finditer(text), 1):
+            paragraph_start, paragraph_end = start + paragraph.start(), start + paragraph.end()
+            paragraphs.append({"id": f"md_p_{len(sections) + 1:04d}_{paragraph_index:03d}",
+                               "text": raw[paragraph_start:paragraph_end], "start_offset": paragraph_start,
+                               "end_offset": paragraph_end})
+        sections.append({"id": section_id, "section_type": _section_type(heading), "heading": heading,
+                         "text": text, "start_offset": start, "end_offset": end, "parent_section_id": None,
+                         "parent_structure_id": None, "structure_id": structure_id, "depth": 1,
+                         "heading_source": "markdown", "structural_kind": "body", "ordinal": len(sections) + 1,
+                         "paragraphs": paragraphs, "page": None, "confidence": 1.0,
+                         "provenance": {"source": "markdown", "page_spans": []}})
+        structure.append({"id": structure_id, "section_id": section_id, "parent_structure_id": None,
+                          "order": len(structure) + 1, "depth": 1, "heading": heading,
+                          "heading_source": "markdown", "hierarchy_status": "verified", "structural_kind": "body"})
+    if not sections:
+        raise ValueError("The Markdown source has no analyzable text.")
+    title_match = re.search(r"(?m)^#\s+(.+)$", raw)
+    metadata = {"title": title_match.group(1).strip() if title_match else "", "authors": "", "year": "",
+                "author_keywords": [], "grobid_keywords": [], "completeness": "full_text_candidate",
+                "body_characters": len(raw), "completeness_warning": "User-supplied Markdown; source completeness was not independently checked.",
+                "bibliography": [], "citation_callouts": [], "source_kind": "markdown",
+                "source_markdown": source_identity}
+    document = {"sections": sections, "structure": structure, "text": raw, "metadata": metadata}
+    mapping = {
+        "schema_version": FULLTEXT_MAPPING_SCHEMA_VERSION, "source_kind": "markdown",
+        "source_markdown": path.name, "source_markdown_sha256": source_identity["sha256"],
+        "source_markdown_size_bytes": source_identity["size_bytes"], "metadata": metadata,
+        "full_text": raw, "full_text_characters": len(raw), "structure": structure,
+        "sections": [{"section_id": item["id"], "ordinal": item["ordinal"], "section_type": item["section_type"],
+                      "heading": item["heading"], "parent_section_id": None, "depth": item["depth"],
+                      "structure_id": item["structure_id"], "parent_structure_id": None,
+                      "heading_source": "markdown", "structural_kind": "body", "text": item["text"],
+                      "start_offset": item["start_offset"], "end_offset": item["end_offset"],
+                      "page_spans": [], "paragraphs": item["paragraphs"], "character_count": len(item["text"])}
+                     for item in sections],
+    }
+    mapping_path = path.with_suffix(".fulltext.json")
+    temporary_path = mapping_path.with_name(f".{mapping_path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        temporary_path.write_text(json.dumps(mapping, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        os.replace(temporary_path, mapping_path)
+    finally:
+        if temporary_path.exists():
+            temporary_path.unlink()
+    if stage_callback:
+        stage_callback("review_draft")
+    draft, model, coverage = _analyze_review_draft(doi, metadata, document, provider)
+    document["metadata"]["fulltext_mapping"] = {"source_kind": "markdown", "cache_status": "created",
+        "mapping_file": str(mapping_path), "mapping_character_count": len(raw), "ai_coverage": coverage}
+    argumentation = _run_argument_analysis(doi, document, provider, stage_callback)
+    if stage_callback:
+        stage_callback("paper_profile")
+    try:
+        profile = _analyze_paper_profile(document, argumentation["propositions"], provider)
+    except Exception as exc:
+        profile = {"schema_version": PAPER_PROFILE_SCHEMA_VERSION, "method": "Review-Revise-Reframe",
+                   "status": "FAILED", "human_review_required": True, "scientific_validity_assessed": False,
+                   "error": str(exc)[:300], "keywords": [], "outline": [], "outline_groups": [],
+                   "outline_quality": {"structural_section_count": len(sections), "eligible_section_count": 0,
+                       "analyzed_section_count": 0, "semantic_section_count": 0, "rhetorical_section_count": 0,
+                       "structural_coverage": 0.0, "semantic_coverage": 0.0, "rhetorical_coverage": 0.0,
+                       "unprocessed_section_ids": [item["id"] for item in sections], "group_count": 0, "grouping_status": "failed"},
+                   "writing_style": {"metrics": _paper_style_metrics(raw), "observations": []},
+                   "retrieval": {"section_count": len(sections), "passage_count": 0, "batch_count": 0},
+                   "validation": {"accepted_items": 0, "rejected_items": 0, "source_quotes_validated": False,
+                       "unsupported_items_exposed": False}}
+    argumentation["analysis_payload"]["paper_profile"] = profile
+    argumentation["legacy_model"] = model
+    argumentation["document"]["metadata"].update({"paper_title": metadata["title"] or doi, "filename": path.name})
+    return {"doi": doi, "grobid": metadata, "analysis": draft, "document": document,
+            "argumentation": argumentation, "fulltext_mapping_path": str(mapping_path)}, argumentation.get("model") or model

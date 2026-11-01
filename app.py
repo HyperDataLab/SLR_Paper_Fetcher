@@ -10,6 +10,7 @@ import hashlib
 import webbrowser
 import threading
 import subprocess
+from pathlib import Path
 import uvicorn
 import requests
 from typing import List, Optional
@@ -22,7 +23,7 @@ import pandas as pd
 from config import settings
 from config import BASE_DIR
 from contextlib import asynccontextmanager
-from paper_io import download_path, safe_filename, valid_pdf_file, safe_message, public_url, institutional_url, generate_standardized_filename, normalize_doi
+from paper_io import download_path, safe_filename, valid_pdf_file, valid_pdf_bytes, safe_message, public_url, institutional_url, generate_standardized_filename, normalize_doi
 from paper_store import get_store
 from doi_resolver import resolve_doi
 from browser_session import browser_manager, browser_worker
@@ -31,6 +32,35 @@ _ANALYSIS_QUEUE = None
 _ANALYSIS_WORKER = None
 _BROWSER_START_TASK = None
 _UI_OPEN_TASK = None
+_SAFFRON_START_TASK = None
+_SAFFRON_RETRY_LOCKS = {}
+_SAFFRON_RUNTIME_STATE = {"status": "disabled", "message": "SAFFRON is disabled."}
+_OPENALEX_BACKFILL_LOCK = threading.Lock()
+_OPENALEX_BACKFILL_STATE = {
+    "status": "idle", "total": 0, "processed": 0, "matched": 0,
+    "not_found": 0, "unavailable": 0, "current_doi": "", "message": "",
+}
+
+def _analysis_paper_id(value):
+    doi = normalize_doi(str(value or ""))
+    if doi:
+        return doi
+    candidate = str(value or "").strip()
+    return candidate if re.fullmatch(r"slrwork_[A-Za-z0-9_-]{1,200}", candidate) else ""
+
+
+def _valid_analysis_source(path):
+    source = Path(path or "")
+    if not source.is_file():
+        return False
+    if source.suffix.lower() == ".pdf":
+        return valid_pdf_file(source)
+    if source.suffix.lower() in {".md", ".markdown"}:
+        try:
+            return bool(source.read_text(encoding="utf-8").strip())
+        except (OSError, UnicodeDecodeError):
+            return False
+    return False
 
 
 async def _analysis_worker():
@@ -41,12 +71,62 @@ async def _analysis_worker():
             store.save_analysis(doi, "PROCESSING", provider=provider, stage="starting")
             paper = store.get(doi)
             metadata = json.loads((paper or {}).get("metadata") or "{}")
-            from ai_analysis import analyze_pdf
+            from ai_analysis import analyze_markdown, analyze_pdf
             def report_stage(stage):
                 store.update_analysis_stage(doi, stage)
-            result, model = await asyncio.to_thread(
-                analyze_pdf, doi, paper["file_path"], provider, report_stage
-            )
+            analyzer = analyze_markdown if Path(paper["file_path"]).suffix.lower() in {".md", ".markdown"} else analyze_pdf
+            result, model = await asyncio.to_thread(analyzer, doi, paper["file_path"], provider, report_stage)
+            if settings.SAFFRON_ENABLED:
+                store.update_analysis_stage(doi, "saffron_term_taxonomy")
+                try:
+                    from saffron_client import SaffronClient
+                    mapping_path = Path(paper["file_path"]).with_suffix(".fulltext.json")
+                    mapping = json.loads(mapping_path.read_text(encoding="utf-8"))
+                    document_metadata = result.get("document", {}).get("metadata", {})
+                    if mapping.get("source_kind") == "markdown":
+                        expected_source_hash = document_metadata.get("source_markdown", {}).get("sha256")
+                        if mapping.get("source_markdown_sha256") != expected_source_hash:
+                            raise ValueError("Markdown mapping SHA-256 does not match this paper analysis run.")
+                    else:
+                        expected_source_hash = document_metadata.get("pdf_artifact", {}).get("sha256")
+                        if mapping.get("source_pdf_sha256") != expected_source_hash:
+                            raise ValueError("Full-text mapping SHA-256 does not match this paper analysis run.")
+                    result["saffron_analysis"] = await asyncio.to_thread(
+                        SaffronClient().analyze_paper,
+                        doi=doi,
+                        title=metadata.get("title") or doi,
+                        mapping=mapping,
+                        paper_metadata=metadata,
+                    )
+                except Exception as exc:
+                    result["saffron_analysis"] = {
+                        "schema_version": "1.0", "status": "FAILED",
+                        "error": str(exc)[:500],
+                        "terms": [], "taxonomy": {"status": "FAILED", "nodes": [], "edges": []},
+                    }
+            else:
+                result["saffron_analysis"] = {
+                    "schema_version": "1.0", "status": "SKIPPED",
+                    "error": "SAFFRON is disabled in Fetcher settings.",
+                    "terms": [], "taxonomy": {"status": "SKIPPED", "nodes": [], "edges": []},
+                }
+            try:
+                from automatic_sources import fetch_openalex_classification
+                classification_doi = "" if str(doi).startswith("slrwork_") else doi
+                openalex_fields = await asyncio.to_thread(
+                    fetch_openalex_classification, classification_doi, metadata.get("openAlexId")
+                )
+                result["openalex_classification"] = _openalex_classification_artifact(openalex_fields) or {
+                    "schema_version": "openalex-topics.v1",
+                    "status": (openalex_fields or {}).get("status", "NOT_FOUND"),
+                    "provenance": {"source": "OPENALEX_TOPICS"},
+                }
+            except Exception as exc:
+                print(f"[OPENALEX] Per-paper classification unavailable for {doi}: {exc}")
+                result["openalex_classification"] = {
+                    "schema_version": "openalex-topics.v1", "status": "UNAVAILABLE",
+                    "provenance": {"source": "OPENALEX_TOPICS"},
+                }
             result["argumentation"]["document"]["metadata"].update({
                 "paper_title": metadata.get("title") or doi,
                 "filename": paper.get("filename") or "",
@@ -59,6 +139,13 @@ async def _analysis_worker():
                     "filename": paper.get("filename") or "",
                 }}, stage="completed",
             )
+            if metadata.get("slr_repository_work_id"):
+                sync = await asyncio.to_thread(
+                    _push_paper_to_repository, store, doi, paper, paper.get("file_path"),
+                    settings.SLR_API_BASE_URL, settings.SLR_API_KEY,
+                )
+                if not sync.get("success"):
+                    print(f"[REPOSITORY] Analysis for {metadata['slr_repository_work_id']} remains local: {sync.get('message', 'sync failed')}")
         except Exception as exc:
             store.save_analysis(doi, "FAILED", provider=provider, error=str(exc)[:500], stage="failed")
         finally:
@@ -66,7 +153,7 @@ async def _analysis_worker():
 
 @asynccontextmanager
 async def lifespan(app):
-    global _ANALYSIS_QUEUE, _ANALYSIS_WORKER, _BROWSER_START_TASK, _UI_OPEN_TASK
+    global _ANALYSIS_QUEUE, _ANALYSIS_WORKER, _BROWSER_START_TASK, _UI_OPEN_TASK, _SAFFRON_START_TASK
     get_store()
     await asyncio.to_thread(get_store().recover_interrupted_downloads)
     _ANALYSIS_QUEUE = asyncio.Queue()
@@ -76,6 +163,20 @@ async def lifespan(app):
         elif analysis["status"] == "PROCESSING":
             get_store().save_analysis(analysis["doi"], "FAILED", provider=analysis.get("provider"), error="App đã khởi động lại khi đang phân tích. Hãy thử lại.")
     _ANALYSIS_WORKER = asyncio.create_task(_analysis_worker())
+    if settings.SAFFRON_ENABLED:
+        async def start_saffron():
+            global _SAFFRON_RUNTIME_STATE
+            _SAFFRON_RUNTIME_STATE = {"status": "starting", "message": "Checking SAFFRON service."}
+            try:
+                from saffron_client import SaffronClient
+                await asyncio.to_thread(SaffronClient().ensure_ready)
+                _SAFFRON_RUNTIME_STATE = {"status": "ready", "message": "SAFFRON service is ready."}
+            except Exception as exc:
+                _SAFFRON_RUNTIME_STATE = {"status": "unavailable", "message": str(exc)[:500]}
+                print(f"[SAFFRON] Warning: service is unavailable: {exc}")
+        _SAFFRON_START_TASK = asyncio.create_task(start_saffron())
+    else:
+        _SAFFRON_RUNTIME_STATE = {"status": "disabled", "message": "SAFFRON is disabled."}
     async def start_browser():
         try:
             await browser_manager.start()
@@ -180,6 +281,13 @@ async def upload_page(request: Request):
         "active_tab": "upload"
     })
 
+@app.get("/repository", response_class=HTMLResponse)
+async def repository_page(request: Request):
+    return templates.TemplateResponse(request=request, name="index.html", context={
+        "vnu_configured": bool(settings.VNU_LIBRARY_ID and settings.VNU_LIBRARY_PASSWORD),
+        "active_tab": "repository"
+    })
+
 
 @app.get("/analysis", response_class=HTMLResponse)
 async def analysis_page(request: Request):
@@ -198,7 +306,7 @@ async def settings_page(request: Request):
 
 @app.get("/analysis/paper/{doi:path}", response_class=HTMLResponse)
 async def paper_analysis_page(request: Request, doi: str):
-    normalized = extract_doi(doi)
+    normalized = _analysis_paper_id(doi)
     if not normalized:
         return HTMLResponse("Invalid paper identifier.", status_code=404)
     response = templates.TemplateResponse(request=request, name="analysis.html", context={
@@ -211,14 +319,27 @@ async def paper_analysis_page(request: Request, doi: str):
 
 @app.get("/api/analysis/pdf/{doi:path}")
 async def analysis_pdf(doi: str):
-    normalized = extract_doi(doi)
+    normalized = _analysis_paper_id(doi)
     if not normalized:
         return JSONResponse({"error": "Invalid DOI."}, status_code=400)
     record = await asyncio.to_thread(get_store().downloaded, normalized)
-    if not record:
+    if not record or Path(record.get("file_path") or "").suffix.lower() != ".pdf" or not valid_pdf_file(record.get("file_path") or ""):
         return JSONResponse({"error": "A valid saved PDF is not available for this paper."}, status_code=404)
     return FileResponse(path=record["file_path"], media_type="application/pdf",
                         headers={"Content-Disposition": "inline"})
+
+
+@app.get("/api/analysis/source/{paper_id:path}")
+async def analysis_source(paper_id: str):
+    normalized = _analysis_paper_id(paper_id)
+    if not normalized:
+        return JSONResponse({"error": "Invalid paper identifier."}, status_code=400)
+    record = await asyncio.to_thread(get_store().downloaded, normalized)
+    if not record or not _valid_analysis_source(record.get("file_path")):
+        return JSONResponse({"error": "A valid saved PDF or Markdown source is not available for this paper."}, status_code=404)
+    path = Path(record["file_path"])
+    media_type = "application/pdf" if path.suffix.lower() == ".pdf" else "text/markdown; charset=utf-8"
+    return FileResponse(path=path, media_type=media_type, headers={"Content-Disposition": "inline"})
 
 
 @app.get("/api/analysis/papers")
@@ -228,7 +349,7 @@ async def analysis_papers():
     analyses = {row["doi"]: row for row in await asyncio.to_thread(store.list_analyses)}
     papers = []
     for record in records:
-        if record["status"] != "DOWNLOADED" or not record.get("file_path") or not valid_pdf_file(record["file_path"]):
+        if record["status"] != "DOWNLOADED" or not _valid_analysis_source(record.get("file_path")):
             continue
         try:
             metadata = json.loads(record.get("metadata") or "{}")
@@ -240,6 +361,7 @@ async def analysis_papers():
             "authors": metadata.get("authors") or "", "year": metadata.get("year") or "",
             "journal": metadata.get("journal") or metadata.get("venue") or "",
             "filename": record.get("filename") or "", "provider": record.get("provider") or "",
+            "source_kind": "markdown" if Path(record["file_path"]).suffix.lower() in {".md", ".markdown"} else "pdf",
             "analysis_status": analysis.get("status", "NOT_STARTED"),
             "analysis_provider": analysis.get("provider") or "",
             "analysis_model": analysis.get("model") or "",
@@ -341,7 +463,7 @@ async def update_analysis_config(request: Request):
 
 @app.get("/api/analysis/draft/{doi:path}")
 async def analysis_draft(doi: str):
-    normalized = extract_doi(doi)
+    normalized = _analysis_paper_id(doi)
     if not normalized:
         return JSONResponse({"error": "Invalid DOI."}, status_code=400)
     record = await asyncio.to_thread(get_store().get_analysis, normalized)
@@ -357,13 +479,94 @@ async def analysis_draft(doi: str):
     record["draft"] = {
         "grobid": draft.get("grobid") or {},
         "analysis": draft.get("analysis") or {},
+        "saffron_analysis": draft.get("saffron_analysis") or {
+            "schema_version": "1.0", "status": "NOT_AVAILABLE", "terms": [],
+            "taxonomy": {"status": "NOT_AVAILABLE", "nodes": [], "edges": []},
+        },
+        "openalex_classification": draft.get("openalex_classification") or {
+            "schema_version": "openalex-topics.v1", "status": "NOT_ANALYZED",
+            "provenance": {"source": "OPENALEX_TOPICS"},
+        },
     }
     return {"analysis": record}
 
 
+@app.post("/api/analysis/saffron/retry")
+async def retry_saffron_analysis(request: Request):
+    if not settings.SAFFRON_ENABLED:
+        return JSONResponse({"error": "SAFFRON is disabled in Fetcher settings."}, status_code=503)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "Invalid JSON request."}, status_code=400)
+    doi = extract_doi(str(body.get("doi") or "")) if isinstance(body, dict) else ""
+    if not doi:
+        return JSONResponse({"error": "A valid DOI is required."}, status_code=400)
+
+    lock = _SAFFRON_RETRY_LOCKS.setdefault(doi, asyncio.Lock())
+    async with lock:
+        store = get_store()
+        analysis = await asyncio.to_thread(store.get_analysis, doi)
+        if not analysis or analysis.get("status") != "DONE" or not analysis.get("draft"):
+            return JSONResponse({"error": "A completed AI analysis is required before retrying SAFFRON."}, status_code=409)
+        paper = await asyncio.to_thread(store.get, doi)
+        if not paper or paper.get("status") != "DOWNLOADED" or not valid_pdf_file(paper.get("file_path") or ""):
+            return JSONResponse({"error": "A valid saved PDF is not available for this paper."}, status_code=409)
+
+        pdf_path = Path(paper["file_path"])
+        mapping_path = pdf_path.with_suffix(".fulltext.json")
+        if not mapping_path.is_file():
+            return JSONResponse({"error": "The validated full-text mapping is missing."}, status_code=409)
+        try:
+            draft = json.loads(analysis["draft"]) if isinstance(analysis["draft"], str) else analysis["draft"]
+            mapping = json.loads(mapping_path.read_text(encoding="utf-8"))
+            metadata = json.loads(paper.get("metadata") or "{}") if isinstance(paper.get("metadata"), str) else (paper.get("metadata") or {})
+        except (OSError, TypeError, ValueError):
+            return JSONResponse({"error": "The saved analysis metadata or full-text mapping is invalid."}, status_code=409)
+        if not isinstance(draft, dict) or not isinstance(mapping, dict) or not isinstance(metadata, dict):
+            return JSONResponse({"error": "The saved analysis metadata or full-text mapping is invalid."}, status_code=409)
+
+        try:
+            current_pdf_sha256 = await asyncio.to_thread(lambda: hashlib.sha256(pdf_path.read_bytes()).hexdigest())
+        except OSError:
+            return JSONResponse({"error": "The saved PDF could not be read."}, status_code=409)
+        mapped_pdf_sha256 = mapping.get("source_pdf_sha256")
+        document = draft.get("document") if isinstance(draft.get("document"), dict) else {}
+        document_metadata = document.get("metadata") if isinstance(document.get("metadata"), dict) else {}
+        pdf_artifact = document_metadata.get("pdf_artifact") if isinstance(document_metadata.get("pdf_artifact"), dict) else {}
+        analyzed_pdf_sha256 = pdf_artifact.get("sha256")
+        if not mapped_pdf_sha256:
+            return JSONResponse({"error": "This full-text mapping predates checksum pinning; reanalyze the paper before retrying SAFFRON."}, status_code=409)
+        if mapped_pdf_sha256 != current_pdf_sha256 or (analyzed_pdf_sha256 and analyzed_pdf_sha256 != current_pdf_sha256):
+            return JSONResponse({"error": "The PDF changed after its analysis; regenerate the full-text mapping before retrying SAFFRON."}, status_code=409)
+
+        try:
+            from saffron_client import SaffronClient
+            grobid = draft.get("grobid") if isinstance(draft.get("grobid"), dict) else {}
+            result = await asyncio.to_thread(
+                SaffronClient().analyze_paper,
+                doi=doi,
+                title=metadata.get("title") or grobid.get("title") or doi,
+                mapping=mapping,
+                paper_metadata=metadata,
+            )
+        except Exception as exc:
+            return JSONResponse({"error": str(exc)[:500]}, status_code=502)
+
+        updated = await asyncio.to_thread(store.update_saffron_analysis, doi, result)
+        if not updated:
+            return JSONResponse({"error": "The AI analysis changed while SAFFRON was running; retry against the latest draft."}, status_code=409)
+        return {
+            "success": True,
+            "status": result.get("status", "FAILED"),
+            "term_count": len(result.get("terms") or []),
+            "taxonomy_status": (result.get("taxonomy") or {}).get("status", "NOT_AVAILABLE"),
+        }
+
+
 @app.get("/api/analysis/argumentation/{doi:path}")
 async def analysis_argumentation(doi: str):
-    normalized = extract_doi(doi)
+    normalized = _analysis_paper_id(doi)
     if not normalized:
         return JSONResponse({"error": "Invalid DOI."}, status_code=400)
     argumentation = await asyncio.to_thread(get_store().get_argumentation, normalized)
@@ -374,7 +577,7 @@ async def analysis_argumentation(doi: str):
 
 @app.post("/api/analysis/review/{doi:path}")
 async def review_analysis_item(doi: str, request: Request):
-    normalized = extract_doi(doi)
+    normalized = _analysis_paper_id(doi)
     if not normalized:
         return JSONResponse({"error": "Invalid DOI."}, status_code=400)
     body = await request.json()
@@ -391,7 +594,7 @@ async def review_analysis_item(doi: str, request: Request):
 
 @app.patch("/api/analysis/edit/{doi:path}")
 async def edit_analysis_item(doi: str, request: Request):
-    normalized = extract_doi(doi)
+    normalized = _analysis_paper_id(doi)
     if not normalized:
         return JSONResponse({"error": "Invalid DOI."}, status_code=400)
     body = await request.json()
@@ -408,7 +611,7 @@ async def edit_analysis_item(doi: str, request: Request):
 
 @app.post("/api/analysis/mvp3/{doi:path}")
 async def evaluate_mvp3(doi: str, request: Request):
-    normalized = extract_doi(doi)
+    normalized = _analysis_paper_id(doi)
     if not normalized:
         return JSONResponse({"error": "Invalid DOI."}, status_code=400)
     body = await request.json()
@@ -496,7 +699,7 @@ async def evaluate_mvp3(doi: str, request: Request):
 
 @app.post("/api/analysis/rubric-review/{doi:path}")
 async def review_mvp3_rubric(doi: str, request: Request):
-    normalized = extract_doi(doi)
+    normalized = _analysis_paper_id(doi)
     if not normalized:
         return JSONResponse({"error": "Invalid DOI."}, status_code=400)
     body = await request.json()
@@ -515,7 +718,7 @@ async def review_mvp3_rubric(doi: str, request: Request):
 
 @app.post("/api/analysis/citation-review/{doi:path}")
 async def review_mvp3_citation(doi: str, request: Request):
-    normalized = extract_doi(doi)
+    normalized = _analysis_paper_id(doi)
     if not normalized:
         return JSONResponse({"error": "Invalid DOI."}, status_code=400)
     body = await request.json()
@@ -533,7 +736,7 @@ async def review_mvp3_citation(doi: str, request: Request):
 
 @app.get("/api/analysis/export/{doi:path}")
 async def export_argumentation(doi: str):
-    normalized = extract_doi(doi)
+    normalized = _analysis_paper_id(doi)
     if not normalized:
         return JSONResponse({"error": "Invalid DOI."}, status_code=400)
     run = await asyncio.to_thread(get_store().get_argumentation, normalized)
@@ -708,7 +911,7 @@ async def enqueue_analysis(request: Request):
         return JSONResponse({"error": "dois must be a list."}, status_code=400)
     store = get_store()
     if requested:
-        normalized_dois = {extract_doi(str(value)) for value in requested}
+        normalized_dois = {_analysis_paper_id(value) for value in requested}
         normalized_dois.discard("")
         records = [await asyncio.to_thread(store.get, doi) for doi in normalized_dois]
     else:
@@ -716,7 +919,7 @@ async def enqueue_analysis(request: Request):
     queued = []
     skipped = []
     for record in records:
-        if not record or record.get("status") != "DOWNLOADED" or not valid_pdf_file(record.get("file_path") or ""):
+        if not record or record.get("status") != "DOWNLOADED" or not _valid_analysis_source(record.get("file_path")):
             continue
         doi = record["doi"]
         accepted = await asyncio.to_thread(
@@ -735,6 +938,21 @@ async def health():
     return {"status": "ok"}
 
 
+@app.get("/api/saffron/health")
+async def saffron_health():
+    if not settings.SAFFRON_ENABLED:
+        return {"enabled": False, **_SAFFRON_RUNTIME_STATE}
+    try:
+        from saffron_client import SaffronClient
+        ready = await asyncio.to_thread(SaffronClient().health)
+        if ready:
+            return {"enabled": True, "status": "ready", "message": "SAFFRON service is ready."}
+        return JSONResponse({"enabled": True, "status": "unavailable",
+                             "message": _SAFFRON_RUNTIME_STATE.get("message") or "SAFFRON is not ready."}, status_code=503)
+    except Exception as exc:
+        return JSONResponse({"enabled": True, "status": "unavailable", "message": str(exc)[:500]}, status_code=503)
+
+
 @app.post("/api/focus-verification")
 async def focus_verification():
     focused = await browser_manager.run(browser_manager.focus_verification_page)
@@ -746,17 +964,17 @@ async def focus_verification():
 @app.get("/api/papers")
 async def paper_status(doi: Optional[str] = None):
     if doi is not None:
-        normalized = extract_doi(doi)
+        normalized = _analysis_paper_id(doi)
         if not normalized:
             return JSONResponse({"error": "INVALID_DOI"}, status_code=400)
         record = await asyncio.to_thread(get_store().get, normalized)
-        if record and record["status"] == "DOWNLOADED" and not valid_pdf_file(record.get("file_path") or ""):
+        if record and record["status"] == "DOWNLOADED" and not _valid_analysis_source(record.get("file_path")):
             get_store().update(normalized, "INVALID_PDF", message="PDF đã bị xóa hoặc không còn đầy đủ.")
             record = get_store().get(normalized)
         return {"paper": record}
     papers = await asyncio.to_thread(get_store().list, 2000)
     for record in papers:
-        if record["status"] == "DOWNLOADED" and not valid_pdf_file(record.get("file_path") or ""):
+        if record["status"] == "DOWNLOADED" and not _valid_analysis_source(record.get("file_path")):
             get_store().update(record["doi"], "INVALID_PDF", message="PDF đã bị xóa hoặc không còn đầy đủ.")
             record["status"] = "INVALID_PDF"
     return {"papers": papers}
@@ -784,6 +1002,15 @@ async def downloaded_papers_endpoint():
                 except Exception:
                     pass
                 analysis = analyses.get(r["doi"], {})
+                openalex_classification = meta.get("openalex_classification")
+                if analysis.get("draft"):
+                    try:
+                        analysis_draft = json.loads(analysis["draft"])
+                        if isinstance(analysis_draft, dict):
+                            openalex_classification = (analysis_draft.get("openalex_classification")
+                                                       or openalex_classification)
+                    except (TypeError, ValueError):
+                        pass
                 downloaded.append({
                     "doi": r["doi"],
                     "filename": r["filename"],
@@ -800,9 +1027,125 @@ async def downloaded_papers_endpoint():
                     "updated_at": r.get("updated_at") or "",
                     "last_uploaded_project": meta.get("last_uploaded_project") or "",
                     "uploaded_at": meta.get("uploaded_at") or "",
-                    "analysis_status": analysis.get("status", "NOT_STARTED")
+                    "analysis_status": analysis.get("status", "NOT_STARTED"),
+                    "openalex_classification": openalex_classification or {
+                        "schema_version": "openalex-topics.v1", "status": "NOT_ANALYZED",
+                    },
                 })
     return {"papers": downloaded, "total": len(downloaded)}
+
+
+def _openalex_artifact_is_current(artifact):
+    if not isinstance(artifact, dict) or artifact.get("status") != "MATCHED":
+        return False
+    provenance = artifact.get("provenance") or {}
+    topics = provenance.get("topics") if isinstance(provenance, dict) else None
+    classification = artifact.get("classification")
+    has_hierarchy_ids = isinstance(classification, dict) and all(
+        isinstance(classification.get(key), list) and classification[key]
+        for key in ("topicIds", "subfieldIds", "fieldIds", "domainIds")
+    )
+    return has_hierarchy_ids and bool(topics) and all(
+        isinstance(topic, dict) and topic.get("id") and topic.get("subfieldId")
+        and topic.get("fieldId") and topic.get("domainId")
+        for topic in topics
+    )
+
+
+def _run_openalex_backfill(items):
+    from automatic_sources import fetch_openalex_classification
+
+    store = get_store()
+    try:
+        for item in items:
+            doi = item["doi"]
+            with _OPENALEX_BACKFILL_LOCK:
+                _OPENALEX_BACKFILL_STATE["current_doi"] = doi
+            try:
+                fields = fetch_openalex_classification(doi, item["openAlexId"])
+                artifact = _openalex_classification_artifact(fields) or {
+                    "schema_version": "openalex-topics.v1",
+                    "status": (fields or {}).get("status", "UNAVAILABLE"),
+                    "provenance": (fields or {}).get("classificationProvenance") or {
+                        "source": "OPENALEX_TOPICS",
+                    },
+                }
+                store.update_openalex_classification(doi, artifact)
+                state_key = "matched" if artifact["status"] == "MATCHED" else (
+                    "unavailable" if artifact["status"] == "UNAVAILABLE" else "not_found"
+                )
+            except Exception as exc:
+                print(f"[OPENALEX] Backfill failed for {doi}: {exc}")
+                artifact = {"schema_version": "openalex-topics.v1", "status": "UNAVAILABLE",
+                            "provenance": {"source": "OPENALEX_TOPICS"}}
+                store.update_openalex_classification(doi, artifact)
+                state_key = "unavailable"
+            with _OPENALEX_BACKFILL_LOCK:
+                _OPENALEX_BACKFILL_STATE["processed"] += 1
+                _OPENALEX_BACKFILL_STATE[state_key] += 1
+    except Exception as exc:
+        print(f"[OPENALEX] Backfill job failed: {exc}")
+        with _OPENALEX_BACKFILL_LOCK:
+            _OPENALEX_BACKFILL_STATE["status"] = "failed"
+            _OPENALEX_BACKFILL_STATE["message"] = "OpenAlex update stopped unexpectedly. Check the Fetcher log."
+    finally:
+        with _OPENALEX_BACKFILL_LOCK:
+            if _OPENALEX_BACKFILL_STATE["status"] == "running":
+                _OPENALEX_BACKFILL_STATE["status"] = "completed"
+            _OPENALEX_BACKFILL_STATE["current_doi"] = ""
+
+
+@app.post("/api/openalex/backfill")
+async def start_openalex_backfill():
+    store = get_store()
+    records = await asyncio.to_thread(store.list, 2000)
+    analyses = {row["doi"]: row for row in await asyncio.to_thread(store.list_analyses)}
+    items = []
+    for record in records:
+        if record.get("status") != "DOWNLOADED" or not valid_pdf_file(record.get("file_path") or ""):
+            continue
+        doi = extract_doi(record.get("doi") or "")
+        if not doi:
+            continue
+        try:
+            metadata = json.loads(record.get("metadata") or "{}")
+        except (TypeError, ValueError):
+            metadata = {}
+        if not isinstance(metadata, dict):
+            metadata = {}
+        analysis = analyses.get(record["doi"], {})
+        artifact = metadata.get("openalex_classification")
+        if analysis.get("draft"):
+            try:
+                draft = json.loads(analysis["draft"])
+                if isinstance(draft, dict):
+                    artifact = draft.get("openalex_classification") or artifact
+            except (TypeError, ValueError):
+                pass
+        if not _openalex_artifact_is_current(artifact):
+            items.append({"doi": doi, "openAlexId": metadata.get("openAlexId") or ""})
+
+    with _OPENALEX_BACKFILL_LOCK:
+        if _OPENALEX_BACKFILL_STATE.get("status") == "running":
+            return JSONResponse({"error": "An OpenAlex update is already running.",
+                                 "state": dict(_OPENALEX_BACKFILL_STATE)}, status_code=409)
+        _OPENALEX_BACKFILL_STATE.update({
+            "status": "running" if items else "completed", "total": len(items), "processed": 0,
+            "matched": 0, "not_found": 0, "unavailable": 0, "current_doi": "",
+            "message": "" if items else "All downloaded papers already have current OpenAlex topics.",
+        })
+        if items:
+            worker = threading.Thread(target=_run_openalex_backfill, args=(items,), daemon=True,
+                                      name="openalex-backfill")
+            worker.start()
+        state = dict(_OPENALEX_BACKFILL_STATE)
+    return JSONResponse({"state": state}, status_code=202 if items else 200)
+
+
+@app.get("/api/openalex/backfill")
+async def openalex_backfill_status():
+    with _OPENALEX_BACKFILL_LOCK:
+        return {"state": dict(_OPENALEX_BACKFILL_STATE)}
 
 @app.get("/api/download-file/{filename}")
 async def get_downloaded_file(filename: str):
@@ -1371,6 +1714,100 @@ def _normalize_fetcher_draft(draft):
     return {**outer_fields, **draft["analysis"]}
 
 
+def _openalex_upload_fields(metadata, doi, analysis_draft=None):
+    """Attach canonical OpenAlex topic IDs for the Repository's existing filters."""
+    artifact = analysis_draft.get("openalex_classification") if isinstance(analysis_draft, dict) else None
+    classification = (artifact.get("classification") if isinstance(artifact, dict) else None)
+    provenance = (artifact.get("provenance") if isinstance(artifact, dict) else None)
+    if not isinstance(classification, dict):
+        classification = metadata.get("classification") if isinstance(metadata, dict) else None
+        provenance = metadata.get("classificationProvenance") if isinstance(metadata, dict) else None
+    openalex_id = ((artifact.get("openAlexId") if isinstance(artifact, dict) else None)
+                   or (metadata.get("openAlexId") if isinstance(metadata, dict) else None))
+    clean_classification = {}
+    has_topics = False
+    if isinstance(classification, dict):
+        # Metadata can come from imported records; only forward bounded ID lists
+        # accepted by the SLR-BE contract.
+        for key in ("topicIds", "subfieldIds", "fieldIds", "domainIds"):
+            values = classification.get(key)
+            if isinstance(values, list):
+                clean_values = list(dict.fromkeys(
+                    value.strip()[:300] for value in values
+                    if isinstance(value, str) and value.strip()
+                ))[:20]
+                if clean_values:
+                    clean_classification[key] = clean_values
+        primary_topic = classification.get("primaryTopicId")
+        if isinstance(primary_topic, str) and primary_topic.strip():
+            clean_classification["primaryTopicId"] = primary_topic.strip()[:300]
+        taxonomy_version = classification.get("taxonomyVersion")
+        if isinstance(taxonomy_version, str) and taxonomy_version.strip():
+            clean_classification["taxonomyVersion"] = taxonomy_version.strip()[:100]
+        has_topics = bool(clean_classification.get("topicIds"))
+        has_complete_hierarchy = has_topics and all(
+            clean_classification.get(key)
+            for key in ("subfieldIds", "fieldIds", "domainIds")
+        )
+        if has_complete_hierarchy:
+            return {
+                "classification": clean_classification,
+                "classificationProvenance": provenance if isinstance(provenance, dict) else None,
+                "openAlexId": openalex_id.strip()[:300] if isinstance(openalex_id, str) and openalex_id.strip() else None,
+            }
+    openalex_id_is_valid = isinstance(openalex_id, str) and re.fullmatch(
+        r"https?://openalex\.org/W\d+|W\d+", openalex_id, re.IGNORECASE
+    )
+    if (not doi or str(doi).startswith("slrwork_")) and not openalex_id_is_valid:
+        return ({
+            "classification": clean_classification,
+            "classificationProvenance": provenance if isinstance(provenance, dict) else None,
+            "openAlexId": openalex_id.strip()[:300] if isinstance(openalex_id, str) and openalex_id.strip() else None,
+        } if has_topics else {})
+    try:
+        from automatic_sources import fetch_openalex_classification
+        lookup_doi = "" if str(doi).startswith("slrwork_") else doi
+        result = fetch_openalex_classification(lookup_doi, openalex_id)
+        if isinstance(result, dict) and result.get("status") == "MATCHED":
+            refreshed = result.get("classification")
+            if isinstance(refreshed, dict) and refreshed.get("topicIds"):
+                # Prefer OpenAlex's current hierarchy, but retain any existing
+                # classification values the response did not include.
+                merged_classification = dict(clean_classification)
+                merged_classification.update(refreshed)
+                result["classification"] = merged_classification
+                if not result.get("classificationProvenance") and isinstance(provenance, dict):
+                    result["classificationProvenance"] = provenance
+                return result
+        if has_topics:
+            # A temporary OpenAlex failure must not erase previously saved topic IDs.
+            return {
+                "classification": clean_classification,
+                "classificationProvenance": provenance if isinstance(provenance, dict) else None,
+                "openAlexId": openalex_id.strip()[:300] if isinstance(openalex_id, str) and openalex_id.strip() else None,
+            }
+        return result or {}
+    except Exception as exc:
+        print(f"[OPENALEX] Topic classification unavailable for {doi}: {exc}")
+        return {}
+
+
+def _openalex_classification_artifact(fields):
+    classification = fields.get("classification") if isinstance(fields, dict) else None
+    if not isinstance(classification, dict) or not classification.get("topicIds"):
+        return None
+    provenance = fields.get("classificationProvenance")
+    if not isinstance(provenance, dict):
+        provenance = {"source": "PAPER_METADATA"}
+    return {
+        "schema_version": "openalex-topics.v1",
+        "status": "MATCHED",
+        "openAlexId": fields.get("openAlexId"),
+        "classification": classification,
+        "provenance": provenance,
+    }
+
+
 def _push_analysis_run_to_slr(store, doi, record, target_path, base_url, api_key, project_id):
     """Upload a completed Fetcher run and its exact full-text mapping snapshot."""
     from pathlib import Path
@@ -1390,16 +1827,15 @@ def _push_analysis_run_to_slr(store, doi, record, target_path, base_url, api_key
         if not mapping_path.is_file():
             raise FileNotFoundError(f"Missing full-text mapping: {mapping_path.name}")
         analysis_payload = {"analysis": {**analysis_record, "draft": draft, "argumentation": argumentation}}
-        analysis_bytes = json.dumps(analysis_payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
         mapping_bytes = mapping_path.read_bytes()
         source_run_id = str(argumentation.get("id") or doi)
-        digest = hashlib.sha256(analysis_bytes + b"\0" + mapping_bytes).hexdigest()
 
         metadata = record.get("metadata")
         if isinstance(metadata, str):
             metadata = json.loads(metadata) if metadata.strip() else {}
         if not isinstance(metadata, dict):
             metadata = {}
+        openalex_fields = _openalex_upload_fields(metadata, doi, draft)
         authors = metadata.get("authors")
         if isinstance(authors, str):
             authors = [{"name": name.strip()} for name in authors.replace(";", ",").split(",") if name.strip()]
@@ -1418,11 +1854,19 @@ def _push_analysis_run_to_slr(store, doi, record, target_path, base_url, api_key
             "pages": metadata.get("pages"), "publicationDate": metadata.get("publicationDate"),
             "publisher": metadata.get("publisher"), "language": metadata.get("language"),
             "publicationType": metadata.get("publicationType"), "keywords": metadata.get("keywords"),
-            "openAlexId": metadata.get("openAlexId"), "externalIdentifiers": metadata.get("externalIdentifiers"),
+            "openAlexId": metadata.get("openAlexId") or openalex_fields.get("openAlexId"),
+            "externalIdentifiers": metadata.get("externalIdentifiers"),
+            **{key: value for key, value in openalex_fields.items() if key in {"classification", "classificationProvenance"}},
             "doi": doi, "sourceUrl": record.get("resolved_url") or metadata.get("sourceUrl") or metadata.get("url"),
             "sourceProvider": record.get("source") or metadata.get("sourceProvider") or "SLR_PAPER_FETCHER",
             "sourceId": source_run_id, "sourcePriority": 10,
         }
+        metadata_payload = {key: value for key, value in metadata_payload.items() if value is not None}
+        openalex_artifact = _openalex_classification_artifact(openalex_fields)
+        if openalex_artifact:
+            analysis_payload["analysis"]["draft"]["openalex_classification"] = openalex_artifact
+        analysis_bytes = json.dumps(analysis_payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        digest = hashlib.sha256(analysis_bytes + b"\0" + mapping_bytes).hexdigest()
         response = requests.post(
             f"{base_url}/api/public/projects/{project_id}/analysis-runs",
             headers={"X-API-Key": api_key, "Idempotency-Key": f"paper-fetcher-{source_run_id[:80]}-{digest}"},
@@ -1452,7 +1896,11 @@ def _push_paper_to_repository(store, doi, record, target_path, base_url, api_key
         meta = json.loads(raw) if isinstance(raw, str) and raw.strip() else raw
         if not isinstance(meta, dict):
             meta = {}
+        work_id = str(meta.get("slr_repository_work_id") or "").strip()
+        work_doi = str(meta.get("doi") or "").strip() or ("" if str(doi).startswith("slrwork_") else str(doi))
         analysis = None
+        analysis_draft = None
+        openalex_fields = None
         mapping = None
         analysis_sync = {"status": "not_available"}
         row = store.get_analysis(doi)
@@ -1462,15 +1910,22 @@ def _push_paper_to_repository(store, doi, record, target_path, base_url, api_key
                 if isinstance(draft, str):
                     draft = json.loads(draft)
                 draft = _normalize_fetcher_draft(draft)
+                analysis_draft = draft
+                openalex_fields = _openalex_upload_fields(meta, doi, analysis_draft)
                 argumentation = store.get_argumentation(doi)
                 mapping_path = Path(target_path).with_suffix(".fulltext.json")
                 if not isinstance(draft, dict) or not isinstance(argumentation, dict) or not mapping_path.is_file():
                     raise ValueError("Completed analysis or full-text mapping is missing")
                 analysis = {"analysis": {**row, "draft": draft, "argumentation": argumentation}}
+                openalex_artifact = _openalex_classification_artifact(openalex_fields)
+                if openalex_artifact:
+                    analysis["analysis"]["draft"]["openalex_classification"] = openalex_artifact
                 mapping = mapping_path.read_bytes()
                 analysis_sync = {"status": "ready"}
             except Exception as exc:
                 analysis_sync = {"status": "failed", "message": str(exc)}
+        if openalex_fields is None:
+            openalex_fields = _openalex_upload_fields(meta, doi, analysis_draft)
         authors = meta.get("authors")
         if isinstance(authors, str):
             authors = [{"name": a.strip()} for a in authors.replace(";", ",").split(",") if a.strip()]
@@ -1488,24 +1943,31 @@ def _push_paper_to_repository(store, doi, record, target_path, base_url, api_key
             "issue": meta.get("issue"), "pages": meta.get("pages"), "publicationDate": meta.get("publicationDate"),
             "publisher": meta.get("publisher"), "language": meta.get("language"),
             "publicationType": meta.get("publicationType"), "keywords": meta.get("keywords"),
-            "openAlexId": meta.get("openAlexId"), "externalIdentifiers": meta.get("externalIdentifiers"),
-            "doi": doi, "sourceUrl": record.get("resolved_url") or meta.get("sourceUrl") or meta.get("url"),
+            "openAlexId": meta.get("openAlexId") or openalex_fields.get("openAlexId"),
+            "externalIdentifiers": meta.get("externalIdentifiers"),
+            **{key: value for key, value in openalex_fields.items() if key in {"classification", "classificationProvenance"}},
+            "doi": work_doi or None, "sourceUrl": record.get("resolved_url") or meta.get("sourceUrl") or meta.get("url"),
             "sourceProvider": record.get("source") or meta.get("sourceProvider") or "SLR_PAPER_FETCHER",
             "sourceId": run_id, "sourcePriority": 10,
         }
         # Zod optional fields must be absent when unknown; JSON null is not accepted.
         metadata = {key: value for key, value in metadata.items() if value is not None}
-        pdf = Path(target_path).read_bytes()
+        source_path = Path(target_path)
+        source_bytes = source_path.read_bytes()
+        source_is_markdown = source_path.suffix.lower() in {".md", ".markdown"}
         metadata_bytes = json.dumps(metadata, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
         analysis_bytes = json.dumps(analysis, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode() if analysis else b""
-        digest = hashlib.sha256(pdf + b"\0" + metadata_bytes + b"\0" + analysis_bytes + b"\0" + (mapping or b"")).hexdigest()
-        files = {"pdf": (Path(target_path).name, pdf, "application/pdf")}
+        digest = hashlib.sha256(source_bytes + b"\0" + metadata_bytes + b"\0" + analysis_bytes + b"\0" + (mapping or b"")).hexdigest()
+        files = {} if source_is_markdown else {"pdf": (source_path.name, source_bytes, "application/pdf")}
         if analysis and mapping is not None:
             files["analysis"] = ("analysis.json", analysis_bytes, "application/json")
             files["fullTextMapping"] = (Path(target_path).with_suffix(".fulltext.json").name, mapping, "application/json")
+        import_data = {"metadata": metadata_bytes.decode("utf-8"), **({"workId": work_id} if work_id else {"doi": work_doi})}
+        if source_is_markdown and meta.get("slr_repository_source_artifact_id"):
+            import_data["sourceArtifactId"] = meta["slr_repository_source_artifact_id"]
         response = requests.post(f"{base_url}/api/public/v1/repository/works/import",
             headers={"X-API-Key": api_key, "Idempotency-Key": f"paper-fetcher-repository-{digest}"},
-            data={"doi": doi, "metadata": metadata_bytes.decode("utf-8")}, files=files, timeout=180)
+            data=import_data, files=files, timeout=180)
         if response.status_code not in (200, 201):
             try:
                 payload = response.json()
@@ -1521,6 +1983,192 @@ def _push_paper_to_repository(store, doi, record, target_path, base_url, api_key
         return {"success": True, "data": result, "analysis_sync": analysis_sync}
     except Exception as exc:
         return {"success": False, "message": str(exc)}
+
+
+def _repository_api_headers(api_key):
+    return {"X-API-Key": api_key, "Accept": "application/json"}
+
+
+def _repository_get_work(base_url, api_key, work_id):
+    response = requests.get(f"{base_url}/api/public/v1/repository/works/{work_id}",
+                            headers=_repository_api_headers(api_key), timeout=60)
+    response.raise_for_status()
+    return response.json().get("data") or {}
+
+
+def _repository_apply_openalex_classification(base_url, api_key, work_id, metadata, doi):
+    """Look up OpenAlex topics and save their canonical IDs on an existing Work."""
+    from automatic_sources import fetch_openalex_classification
+
+    fields = fetch_openalex_classification(doi, metadata.get("openAlexId"))
+    classification = fields.get("classification") if isinstance(fields, dict) else None
+    if not isinstance(classification, dict) or not classification.get("topicIds"):
+        return {"matched": False, "status": (fields or {}).get("status", "NOT_FOUND")}
+    response = requests.patch(
+        f"{base_url}/api/public/v1/repository/works/{work_id}/classification",
+        headers={**_repository_api_headers(api_key), "Content-Type": "application/json"},
+        json=classification,
+        timeout=60,
+    )
+    response.raise_for_status()
+    return {"matched": True, "status": "MATCHED"}
+
+
+@app.post("/api/slr/repository/taxonomy-sync")
+async def start_slr_repository_taxonomy_sync():
+    settings.refresh_api_credentials()
+    if not settings.SLR_API_KEY:
+        return JSONResponse({"success": False, "error": "Configure an SLR Repository API key first."}, status_code=400)
+    try:
+        response = await asyncio.to_thread(
+            requests.post,
+            f"{settings.SLR_API_BASE_URL}/api/public/v1/repository/taxonomy/sync",
+            headers=_repository_api_headers(settings.SLR_API_KEY), timeout=30,
+        )
+        payload = response.json()
+        if not response.ok:
+            errors = payload.get("errors")
+            error = (errors[0].get("message") if isinstance(errors, list) and errors and isinstance(errors[0], dict)
+                     else errors.get("message") if isinstance(errors, dict) else None)
+            error = error or payload.get("message") or response.text
+            return JSONResponse({"success": False, "error": str(error)[:500], "state": (payload.get("data") or {}).get("state")}, status_code=response.status_code)
+        return {"success": True, "state": (payload.get("data") or {}).get("state")}
+    except (requests.RequestException, ValueError) as exc:
+        detail = getattr(getattr(exc, "response", None), "text", "") or str(exc)
+        return JSONResponse({"success": False, "error": f"Taxonomy sync request failed: {detail[:500]}"}, status_code=502)
+
+
+@app.get("/api/slr/repository/taxonomy-sync")
+async def slr_repository_taxonomy_sync_status():
+    settings.refresh_api_credentials()
+    if not settings.SLR_API_KEY:
+        return JSONResponse({"success": False, "error": "Configure an SLR Repository API key first."}, status_code=400)
+    try:
+        response = await asyncio.to_thread(
+            requests.get,
+            f"{settings.SLR_API_BASE_URL}/api/public/v1/repository/taxonomy/sync",
+            headers=_repository_api_headers(settings.SLR_API_KEY), timeout=30,
+        )
+        payload = response.json()
+        if not response.ok:
+            errors = payload.get("errors")
+            error = (errors[0].get("message") if isinstance(errors, list) and errors and isinstance(errors[0], dict)
+                     else errors.get("message") if isinstance(errors, dict) else None)
+            error = error or payload.get("message") or response.text
+            return JSONResponse({"success": False, "error": str(error)[:500]}, status_code=response.status_code)
+        return {"success": True, "state": (payload.get("data") or {}).get("state")}
+    except (requests.RequestException, ValueError) as exc:
+        detail = getattr(getattr(exc, "response", None), "text", "") or str(exc)
+        return JSONResponse({"success": False, "error": f"Taxonomy sync status request failed: {detail[:500]}"}, status_code=502)
+
+
+@app.get("/api/slr/repository/inbox")
+async def slr_repository_inbox(cursor: str = "", limit: int = 50):
+    base_url, api_key = settings.SLR_API_BASE_URL, settings.SLR_API_KEY
+    if not api_key:
+        return JSONResponse({"success": False, "error": "Configure an SLR Repository API key first."}, status_code=400)
+    params = {"needsFetcherProcessing": "true", "limit": max(1, min(int(limit), 100))}
+    if cursor:
+        params["cursor"] = cursor
+    try:
+        response = await asyncio.to_thread(requests.get, f"{base_url}/api/public/v1/repository/works",
+                                           headers=_repository_api_headers(api_key), params=params, timeout=60)
+        response.raise_for_status()
+        return {"success": True, **(response.json().get("data") or {})}
+    except requests.RequestException as exc:
+        detail = getattr(getattr(exc, "response", None), "text", "") or str(exc)
+        return JSONResponse({"success": False, "error": f"SLR repository inbox request failed: {detail[:500]}"}, status_code=502)
+
+
+@app.post("/api/slr/repository/works/{work_id}/process")
+async def process_slr_repository_work(work_id: str):
+    if not re.fullmatch(r"work_[A-Za-z0-9_-]{8,100}", work_id):
+        return JSONResponse({"success": False, "error": "Invalid Work ID."}, status_code=400)
+    base_url, api_key = settings.SLR_API_BASE_URL, settings.SLR_API_KEY
+    if not api_key:
+        return JSONResponse({"success": False, "error": "Configure an SLR Repository API key first."}, status_code=400)
+    try:
+        work = await asyncio.to_thread(_repository_get_work, base_url, api_key, work_id)
+        artifacts_response = await asyncio.to_thread(
+            requests.get, f"{base_url}/api/public/v1/repository/works/{work_id}/artifacts",
+            headers=_repository_api_headers(api_key), params={"limit": 100}, timeout=60)
+        artifacts_response.raise_for_status()
+        artifacts = artifacts_response.json().get("data") or []
+        has_analysis = any(item.get("kind") == "PAPER_ANALYSIS_JSON" and item.get("status") == "READY" for item in artifacts)
+        classification = work.get("classification") or {}
+        has_classification = bool(classification.get("topicIds")) and all(
+            classification.get(key)
+            for key in ("subfieldIds", "fieldIds", "domainIds")
+        )
+        doi = (work.get("identifiers") or {}).get("doi") or (work.get("metadata") or {}).get("doi")
+        if has_analysis:
+            if not has_classification:
+                metadata = work.get("metadata") or {}
+                identifiers = work.get("identifiers") or {}
+                metadata = {**metadata, "openAlexId": identifiers.get("openAlexId") or metadata.get("openAlexId")}
+                classification_result = await asyncio.to_thread(
+                    _repository_apply_openalex_classification, base_url, api_key, work_id, metadata, doi
+                )
+                if classification_result.get("matched"):
+                    return {"success": True, "work_id": work_id, "status": "complete",
+                            "analysis": "already_complete", "taxonomy": "matched", "doi": doi}
+                return {"success": True, "work_id": work_id, "status": "unclassified",
+                        "analysis": "already_complete", "taxonomy": classification_result.get("status"), "doi": doi}
+            return {"success": True, "work_id": work_id, "status": "complete",
+                    "analysis": "already_complete", "doi": doi}
+
+        source = next((item for item in artifacts if item.get("kind") == "SOURCE_PDF" and item.get("status") == "READY"), None)
+        if not source:
+            source = next((item for item in artifacts if item.get("kind") == "FULLTEXT_MARKDOWN" and item.get("status") == "READY"), None)
+        if not source:
+            return JSONResponse({"success": False, "work_id": work_id, "status": "unsupported_source",
+                                 "error": "No ready PDF or Markdown source is available."}, status_code=422)
+        source_is_markdown = source.get("kind") == "FULLTEXT_MARKDOWN"
+        extension = ".md" if source_is_markdown else ".pdf"
+        safe_id = re.sub(r"[^A-Za-z0-9_-]", "_", work_id)
+        directory = settings.DOWNLOAD_FOLDER / "repository_inbox"
+        directory.mkdir(parents=True, exist_ok=True)
+        target_path = (directory / f"{safe_id}{extension}").resolve()
+        download_url = f"{base_url}/api/public/v1/repository/works/{work_id}/artifacts/{source['artifactId']}/download"
+        download_response = await asyncio.to_thread(requests.get, download_url, headers=_repository_api_headers(api_key), timeout=180)
+        download_response.raise_for_status()
+        if not source_is_markdown and not valid_pdf_bytes(download_response.content):
+            return JSONResponse({"success": False, "work_id": work_id, "error": "The repository source artifact is not a valid PDF."}, status_code=422)
+        if source_is_markdown:
+            try:
+                download_response.content.decode("utf-8")
+            except UnicodeDecodeError:
+                return JSONResponse({"success": False, "work_id": work_id, "error": "The Markdown source is not valid UTF-8."}, status_code=422)
+        target_path.write_bytes(download_response.content)
+        metadata = work.get("metadata") or {}
+        record_key = normalize_doi(str(doi or "")) or f"slrwork_{work_id}"
+        authors = metadata.get("authors") or []
+        if isinstance(authors, list):
+            authors = ", ".join(item if isinstance(item, str) else str(item.get("name") or "") for item in authors)
+        local_metadata = {
+            "title": metadata.get("title") or source.get("fileName") or record_key,
+            "doi": normalize_doi(str(doi or "")) or None,
+            "authors": authors, "abstract": metadata.get("abstract") or "",
+            "year": metadata.get("publicationYear") or "", "journal": metadata.get("journal") or metadata.get("venue") or "",
+            "openAlexId": (work.get("identifiers") or {}).get("openAlexId") or metadata.get("openAlexId"),
+            "slr_repository_work_id": work_id,
+            "slr_repository_source_artifact_id": source.get("artifactId"),
+            "slr_repository_source_kind": source.get("kind"),
+        }
+        store = get_store()
+        store.update(record_key, "DOWNLOADED", filename=target_path.name, file_path=str(target_path), source="SLR_REPOSITORY",
+                     metadata=local_metadata, message="Imported from the shared SLR repository for analysis.")
+        provider = settings.AI_DEFAULT_PROVIDER if settings.AI_DEFAULT_PROVIDER in {"ollama", "gemini"} else "ollama"
+        accepted = await asyncio.to_thread(store.try_queue_analysis, record_key, provider)
+        if accepted:
+            _ANALYSIS_QUEUE.put_nowait((record_key, provider))
+        return {"success": True, "work_id": work_id, "doi": normalize_doi(str(doi or "")) or None,
+                "record_key": record_key, "status": "queued" if accepted else "already_queued", "title": local_metadata["title"]}
+    except requests.RequestException as exc:
+        detail = getattr(getattr(exc, "response", None), "text", "") or str(exc)
+        return JSONResponse({"success": False, "work_id": work_id, "error": f"SLR repository processing failed: {detail[:500]}"}, status_code=502)
+    except Exception as exc:
+        return JSONResponse({"success": False, "work_id": work_id, "error": str(exc)[:500]}, status_code=500)
 
 
 @app.post("/api/slr/push-papers")

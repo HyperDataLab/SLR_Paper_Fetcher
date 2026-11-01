@@ -31,7 +31,7 @@
       <div class="mb-7">
         <p class="text-xs font-bold uppercase tracking-[.16em] text-blue-600">Preferences</p>
         <h1 class="mt-2 text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">Settings</h1>
-        <p class="mt-2 text-sm leading-6 text-slate-500">Choose which AI provider to use for new paper analyses and manage its connection details.</p>
+        <p class="mt-2 text-sm leading-6 text-slate-500">Manage AI analysis providers and the SLR System connection used for uploads and shared work.</p>
       </div>
 
       <form id="aiSettingsForm" class="settings-form space-y-5">
@@ -84,11 +84,47 @@
           <p class="mt-4 rounded-xl bg-slate-50 px-4 py-3 text-xs leading-5 text-slate-500">The key is stored in this app's local .env file and used by the server. It is not returned to the browser.</p>
         </section>
 
-        <div class="flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <p id="saveMessage" role="status" aria-live="polite" class="min-h-5 text-sm text-slate-500"></p>
-          <button id="saveSettings" type="submit" class="inline-flex min-h-11 items-center justify-center rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-wait disabled:opacity-60">Save settings</button>
-        </div>
       </form>
+
+      <section class="mt-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-7" aria-labelledby="slrSettingsTitle">
+        <div class="mb-5 flex flex-wrap items-start justify-between gap-3">
+          <div><h2 id="slrSettingsTitle" class="text-base font-bold text-slate-900">SLR System connection</h2><p class="mt-1 text-sm text-slate-500">Configure the backend, API key, and optional default project for uploads and shared inbox sync.</p></div>
+          <span id="slrApiStatus" class="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">Loading...</span>
+        </div>
+        <div class="grid gap-4 sm:grid-cols-2">
+          <div class="sm:col-span-2">
+            <label for="slrBaseUrl" class="mb-2 block text-sm font-semibold text-slate-700">SLR Backend URL</label>
+            <input id="slrBaseUrl" type="url" maxlength="500" placeholder="http://127.0.0.1:5000" class="w-full rounded-xl border border-slate-300 px-3.5 py-3 text-sm font-mono outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100">
+          </div>
+          <div class="sm:col-span-2">
+            <label for="slrApiKey" class="mb-2 block text-sm font-semibold text-slate-700">SLR API key (X-API-Key)</label>
+            <input id="slrApiKey" type="password" autocomplete="new-password" maxlength="4096" placeholder="Enter a new key, or leave blank to keep the saved key" class="w-full rounded-xl border border-slate-300 px-3.5 py-3 text-sm font-mono outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100">
+            <p id="slrApiKeyHelp" class="mt-2 text-xs leading-5 text-slate-500">The saved key is never shown in the browser.</p>
+          </div>
+          <div class="sm:col-span-2">
+            <label for="slrDefaultProject" class="mb-2 block text-sm font-semibold text-slate-700">Default project ID (optional)</label>
+            <input id="slrDefaultProject" type="text" maxlength="200" placeholder="Project ID" class="w-full rounded-xl border border-slate-300 px-3.5 py-3 text-sm font-mono outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-100">
+          </div>
+        </div>
+        <div class="mt-5 flex flex-col gap-3 border-t border-slate-100 pt-4 sm:flex-row sm:items-center sm:justify-between">
+          <div><button id="testSlrConnection" type="button" class="inline-flex min-h-10 items-center justify-center rounded-xl bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-200 disabled:cursor-wait disabled:opacity-60">Test connection</button><p class="mt-2 text-xs text-slate-500">Save changes before testing the updated connection.</p></div>
+          <p id="slrConnectionResult" role="status" aria-live="polite" class="hidden rounded-xl border p-3 text-sm"></p>
+        </div>
+        <div class="mt-4 flex flex-col gap-3 border-t border-slate-100 pt-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h3 class="text-sm font-semibold text-slate-800">OpenAlex taxonomy</h3>
+            <p class="mt-1 text-xs leading-5 text-slate-500">Load the shared Domain → Field → Subfield → Topic hierarchy used by repository filters.</p>
+          </div>
+          <div class="flex flex-wrap items-center gap-3">
+            <p id="taxonomySyncResult" role="status" aria-live="polite" class="text-sm text-slate-500">Not started</p>
+            <button id="syncTaxonomy" type="button" class="inline-flex min-h-10 items-center justify-center rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-blue-700 disabled:cursor-wait disabled:opacity-60">Sync taxonomy</button>
+          </div>
+        </div>
+      </section>
+      <div class="mt-6 flex flex-col-reverse gap-3 border-t border-slate-200 pt-5 sm:flex-row sm:items-center sm:justify-between">
+        <p id="saveMessage" role="status" aria-live="polite" class="min-h-5 text-sm text-slate-500"></p>
+        <button id="saveSettings" form="aiSettingsForm" type="submit" class="inline-flex min-h-11 items-center justify-center rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-wait disabled:opacity-60">Save settings</button>
+      </div>
     </main>
   </div>
   <script>
@@ -97,6 +133,9 @@
     const clearKey = document.getElementById('clearGeminiKey');
     const clearKeyRow = document.getElementById('clearKeyRow');
     const saveMessage = document.getElementById('saveMessage');
+    const slrConnectionResult = document.getElementById('slrConnectionResult');
+    const taxonomySyncResult = document.getElementById('taxonomySyncResult');
+    const syncTaxonomyButton = document.getElementById('syncTaxonomy');
     const setGeminiConfigured = configured => {
       const status = document.getElementById('geminiStatus');
       status.textContent = configured ? 'API key saved' : 'Not configured';
@@ -128,6 +167,121 @@
       }
     }
 
+    async function loadSlrSettings() {
+      const status = document.getElementById('slrApiStatus');
+      try {
+        const response = await fetch('/api/slr/config');
+        const config = await response.json();
+        if (!response.ok) throw new Error(config.error || 'Could not load SLR settings.');
+        document.getElementById('slrBaseUrl').value = config.base_url || 'http://127.0.0.1:5000';
+        document.getElementById('slrDefaultProject').value = config.default_project_id || '';
+        document.getElementById('slrApiKey').value = '';
+        document.getElementById('slrApiKeyHelp').textContent = config.has_api_key
+          ? `A key is saved (${config.api_key_masked || 'configured'}). Enter a new key only to replace it.`
+          : 'No SLR API key is saved. The key is stored locally by the Fetcher server.';
+        status.textContent = config.has_api_key ? 'API key configured' : 'API key not configured';
+        status.className = config.has_api_key
+          ? 'rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700'
+          : 'rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700';
+      } catch (error) {
+        status.textContent = 'Could not load';
+        status.className = 'rounded-full bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-700';
+        saveMessage.textContent = error.message || 'Could not load SLR settings.';
+        saveMessage.className = 'min-h-5 text-sm text-rose-600';
+      }
+    }
+
+    function renderTaxonomySyncState(state) {
+      if (!state) return;
+      const counts = state.counts || {};
+      const summary = [
+        counts.domains ? `${counts.domains} domains` : '',
+        counts.fields ? `${counts.fields} fields` : '',
+        counts.subfields ? `${counts.subfields} subfields` : '',
+        counts.topics ? `${counts.topics} topics` : ''
+      ].filter(Boolean).join(' · ');
+      if (state.status === 'running') {
+        taxonomySyncResult.textContent = `${state.phase || 'Loading taxonomy'}${summary ? ` · ${summary}` : ''}`;
+        taxonomySyncResult.className = 'text-sm text-blue-700';
+        syncTaxonomyButton.disabled = true;
+        syncTaxonomyButton.textContent = 'Syncing...';
+      } else if (state.status === 'completed') {
+        taxonomySyncResult.textContent = `Synced${summary ? ` · ${summary}` : ''}`;
+        taxonomySyncResult.className = 'text-sm text-emerald-700';
+        syncTaxonomyButton.disabled = false;
+        syncTaxonomyButton.textContent = 'Sync again';
+      } else if (state.status === 'failed') {
+        taxonomySyncResult.textContent = state.error || 'Taxonomy sync failed.';
+        taxonomySyncResult.className = 'text-sm text-rose-700';
+        syncTaxonomyButton.disabled = false;
+        syncTaxonomyButton.textContent = 'Retry sync';
+      } else {
+        taxonomySyncResult.textContent = 'Not started';
+        taxonomySyncResult.className = 'text-sm text-slate-500';
+        syncTaxonomyButton.disabled = false;
+        syncTaxonomyButton.textContent = 'Sync taxonomy';
+      }
+    }
+
+    async function loadTaxonomySyncStatus() {
+      try {
+        const response = await fetch('/api/slr/repository/taxonomy-sync');
+        const result = await response.json();
+        if (!response.ok || !result.success) throw new Error(result.error || 'Could not load taxonomy sync status.');
+        renderTaxonomySyncState(result.state);
+        if (result.state?.status === 'running') setTimeout(loadTaxonomySyncStatus, 3000);
+      } catch (error) {
+        taxonomySyncResult.textContent = error.message || 'Could not load sync status.';
+        taxonomySyncResult.className = 'text-sm text-rose-700';
+      }
+    }
+
+    syncTaxonomyButton.addEventListener('click', async () => {
+      syncTaxonomyButton.disabled = true;
+      taxonomySyncResult.textContent = 'Starting taxonomy sync...';
+      taxonomySyncResult.className = 'text-sm text-slate-500';
+      try {
+        const response = await fetch('/api/slr/repository/taxonomy-sync', {method: 'POST'});
+        const result = await response.json();
+        if (!response.ok || !result.success) throw new Error(result.error || 'Could not start taxonomy sync.');
+        renderTaxonomySyncState(result.state);
+        while (result.state?.status === 'running') {
+          await new Promise(resolve => setTimeout(resolve, 3000));
+          const statusResponse = await fetch('/api/slr/repository/taxonomy-sync');
+          const statusResult = await statusResponse.json();
+          if (!statusResponse.ok || !statusResult.success) throw new Error(statusResult.error || 'Could not check taxonomy sync status.');
+          renderTaxonomySyncState(statusResult.state);
+          result.state = statusResult.state;
+        }
+      } catch (error) {
+        taxonomySyncResult.textContent = error.message || 'Could not sync OpenAlex taxonomy.';
+        taxonomySyncResult.className = 'text-sm text-rose-700';
+        syncTaxonomyButton.disabled = false;
+        syncTaxonomyButton.textContent = 'Retry sync';
+      }
+    });
+
+    document.getElementById('testSlrConnection').addEventListener('click', async event => {
+      const button = event.currentTarget;
+      button.disabled = true;
+      button.textContent = 'Testing connection...';
+      slrConnectionResult.className = 'rounded-xl border p-3 text-sm bg-slate-50 text-slate-700 border-slate-200';
+      slrConnectionResult.textContent = 'Testing the saved SLR connection...';
+      try {
+        const response = await fetch('/api/slr/projects');
+        const result = await response.json();
+        if (!response.ok || !result.success) throw new Error(result.error || 'Could not connect to SLR.');
+        slrConnectionResult.className = 'rounded-xl border p-3 text-sm bg-emerald-50 text-emerald-800 border-emerald-200';
+        slrConnectionResult.textContent = `Connection successful. Found ${result.projects.length} project(s).`;
+      } catch (error) {
+        slrConnectionResult.className = 'rounded-xl border p-3 text-sm bg-rose-50 text-rose-800 border-rose-200';
+        slrConnectionResult.textContent = error.message || 'Could not connect to SLR.';
+      } finally {
+        button.disabled = false;
+        button.textContent = 'Test connection';
+      }
+    });
+
     clearKey.addEventListener('change', () => {
       keyInput.disabled = clearKey.checked;
       if (clearKey.checked) keyInput.value = '';
@@ -138,7 +292,7 @@
       button.disabled = true;
       saveMessage.textContent = 'Saving settings...';
       saveMessage.className = 'min-h-5 text-sm text-slate-500';
-      const payload = {
+      const aiPayload = {
         default_provider: document.getElementById('defaultProvider').value,
         ollama_url: document.getElementById('ollamaUrl').value.trim(),
         ollama_model: document.getElementById('ollamaModel').value.trim(),
@@ -146,27 +300,54 @@
         gemini_api_key: keyInput.value,
         clear_gemini_key: clearKey.checked
       };
+      const slrPayload = {
+        base_url: document.getElementById('slrBaseUrl').value.trim(),
+        api_key: document.getElementById('slrApiKey').value.trim(),
+        default_project_id: document.getElementById('slrDefaultProject').value.trim()
+      };
       try {
-        const response = await fetch('/api/analysis/config', {
-          method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)
-        });
-        const result = await response.json();
-        if (!response.ok) throw new Error(result.error || 'Could not save settings.');
-        keyInput.value = '';
-        clearKey.checked = false;
-        keyInput.disabled = false;
-        setGeminiConfigured(Boolean(result.config.gemini_configured));
-        saveMessage.textContent = 'Settings saved.';
-        saveMessage.className = 'min-h-5 text-sm text-emerald-700';
-      } catch (error) {
-        saveMessage.textContent = error.message || 'Could not save settings.';
-        saveMessage.className = 'min-h-5 text-sm text-rose-600';
+        const results = [];
+        for (const [url, payload] of [
+          ['/api/analysis/config', aiPayload],
+          ['/api/slr/config', slrPayload]
+        ]) {
+          try {
+            const response = await fetch(url, {
+              method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)
+            });
+            const result = await response.json();
+            if (!response.ok || (url === '/api/slr/config' && !result.success)) {
+              throw new Error(result.error || `Could not save ${url.includes('/slr/') ? 'SLR' : 'AI'} settings.`);
+            }
+            results.push({status: 'fulfilled', value: result});
+          } catch (reason) {
+            results.push({status: 'rejected', reason});
+          }
+        }
+        const errors = [];
+        if (results[0].status === 'fulfilled') {
+          const result = results[0].value;
+          keyInput.value = '';
+          clearKey.checked = false;
+          keyInput.disabled = false;
+          setGeminiConfigured(Boolean(result.config.gemini_configured));
+        } else errors.push(`AI settings: ${results[0].reason.message}`);
+        if (results[1].status === 'fulfilled') {
+          document.getElementById('slrApiKey').value = '';
+          await loadSlrSettings();
+        } else errors.push(`SLR settings: ${results[1].reason.message}`);
+        saveMessage.textContent = errors.length
+          ? `${errors.join(' ')}${errors.length === 1 ? ' Other settings were saved if successful.' : ''}`
+          : 'All settings saved.';
+        saveMessage.className = errors.length ? 'min-h-5 text-sm text-rose-600' : 'min-h-5 text-sm text-emerald-700';
       } finally {
         button.disabled = false;
       }
     });
 
     loadSettings();
+    loadSlrSettings();
+    loadTaxonomySyncStatus();
   </script>
 </body>
 </html>

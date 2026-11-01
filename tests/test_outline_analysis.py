@@ -5,6 +5,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 from ai_analysis import (
+    FULLTEXT_MAPPING_SCHEMA_VERSION,
+    _pdf_artifact_identity,
     _extract_tei_document,
     _fallback_outline_groups,
     _group_outline_sections,
@@ -55,7 +57,8 @@ class OutlineParserTests(unittest.TestCase):
         self.assertEqual(len(document["sections"][0]["paragraphs"]), 2)
         with tempfile.TemporaryDirectory() as directory:
             pdf_path = Path(directory) / "paper.pdf"
-            mapping_path = _write_fulltext_mapping(pdf_path, document)
+            pdf_path.write_bytes(b"%PDF test artifact")
+            mapping_path = _write_fulltext_mapping(pdf_path, document, _pdf_artifact_identity(pdf_path))
             loaded = _load_and_validate_fulltext_mapping(mapping_path)
         paragraphs = loaded["sections"][0]["paragraphs"]
         self.assertEqual([item["text"] for item in paragraphs], [first.strip(), second.strip()])
@@ -247,13 +250,18 @@ class OutlinePersistenceTests(unittest.TestCase):
 
     def test_fulltext_mapping_rejects_invalid_paragraph_offsets(self):
         text = "Sample full text"
-        mapping = {"schema_version": 1, "full_text": text, "full_text_characters": len(text),
+        mapping = {"schema_version": FULLTEXT_MAPPING_SCHEMA_VERSION, "full_text": text, "full_text_characters": len(text),
             "metadata": {"completeness": "full_text_candidate"}, "structure": [{"id": "structure-1", "section_id": "sec_1",
             "parent_structure_id": None}], "sections": [{"section_id": "sec_1", "ordinal": 1, "section_type": "other",
             "heading": "Results", "text": text, "start_offset": 0, "end_offset": len(text),
             "paragraphs": [{"id": "p_1", "text": text, "start_offset": 1, "end_offset": len(text) + 1}]}]}
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "mapping.json"
+            source_pdf = Path(directory) / "source.pdf"
+            source_pdf.write_bytes(b"%PDF test artifact")
+            identity = _pdf_artifact_identity(source_pdf)
+            mapping.update({"source_pdf": source_pdf.name, "source_pdf_sha256": identity["sha256"],
+                "source_pdf_size_bytes": identity["size_bytes"]})
             path.write_text(json.dumps(mapping), encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "paragraph/source offset"):
                 _load_and_validate_fulltext_mapping(path)

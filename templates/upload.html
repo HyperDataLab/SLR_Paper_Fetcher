@@ -455,11 +455,7 @@
                                 <input type="text" id="manualProjectId" oninput="onManualProjectInput()" placeholder="Nhập mã dự án (VD: proj-test-123)" class="w-full bg-slate-900 text-white text-xs px-3 py-2 rounded-lg border border-amber-400/50 focus:outline-none focus:ring-1 focus:ring-amber-400 font-mono">
                             </div>
                         </div>
-                        <button type="button" onclick="openSlrConfigModal()" aria-label="Configure API connection" class="shrink-0 self-stretch bg-white/10 hover:bg-white/20 text-white px-3.5 py-2 rounded-xl border border-white/10 text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer" title="Cấu hình kết nối SLR Server & API Key">
-                            <svg class="w-4 h-4 text-indigo-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
-                            <span class="hidden sm:inline">Cấu hình API</span>
-                        </button>
-                        </div>
+                                        </div>
                     </div>
 
                 </div>
@@ -505,6 +501,49 @@
                 </div>
             </div>
         </div>
+
+        <section id="openAlexTaxonomyPanel" class="mb-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm" aria-labelledby="openAlexTaxonomyTitle">
+            <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                <div class="min-w-0">
+                    <div class="flex flex-wrap items-center gap-2">
+                        <h2 id="openAlexTaxonomyTitle" class="text-sm font-bold text-slate-800">Phân loại theo OpenAlex</h2>
+                        <span class="rounded-full border border-blue-100 bg-blue-50 px-2 py-0.5 text-[10px] font-semibold text-blue-700">Domain → Field → Subfield → Topic</span>
+                    </div>
+                    <p id="openAlexCoverage" class="mt-1 text-xs text-slate-500">Đang kiểm tra classification đã lưu...</p>
+                </div>
+                <div class="flex shrink-0 flex-wrap items-center gap-2">
+                    <label for="openAlexSort" class="text-xs font-medium text-slate-500">Sắp xếp</label>
+                    <select id="openAlexSort" onchange="filterTable()" class="rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20">
+                        <option value="recent">Bài mới tải trước</option>
+                        <option value="taxonomy">Theo taxonomy OpenAlex</option>
+                    </select>
+                    <button id="openAlexBackfillButton" type="button" onclick="startOpenAlexBackfill()" class="rounded-lg bg-blue-700 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-500/30 disabled:cursor-wait disabled:opacity-60">
+                        Cập nhật OpenAlex
+                    </button>
+                </div>
+            </div>
+            <div class="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4" aria-label="OpenAlex taxonomy filters">
+                <label class="min-w-0 text-[11px] font-semibold text-slate-500">Domain
+                    <select id="openAlexDomainFilter" onchange="onOpenAlexFilterChange(0)" class="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs font-medium text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"><option value="">Tất cả Domain</option></select>
+                </label>
+                <label class="min-w-0 text-[11px] font-semibold text-slate-500">Field
+                    <select id="openAlexFieldFilter" onchange="onOpenAlexFilterChange(1)" class="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs font-medium text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20" disabled><option value="">Tất cả Field</option></select>
+                </label>
+                <label class="min-w-0 text-[11px] font-semibold text-slate-500">Subfield
+                    <select id="openAlexSubfieldFilter" onchange="onOpenAlexFilterChange(2)" class="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs font-medium text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20" disabled><option value="">Tất cả Subfield</option></select>
+                </label>
+                <label class="min-w-0 text-[11px] font-semibold text-slate-500">Topic
+                    <select id="openAlexTopicFilter" onchange="onOpenAlexFilterChange(3)" class="mt-1 block w-full rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs font-medium text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20" disabled><option value="">Tất cả Topic</option></select>
+                </label>
+            </div>
+            <div class="mt-3 flex flex-col gap-2 border-t border-slate-100 pt-3 sm:flex-row sm:items-center sm:justify-between">
+                <label class="inline-flex items-center gap-2 text-xs text-slate-600"><input id="openAlexIncludeSecondary" type="checkbox" onchange="onOpenAlexFilterChange(-1)" class="h-4 w-4 rounded border-slate-300 text-blue-700 focus:ring-blue-500"><span>Tính cả topic phụ (bài có thể xuất hiện ở nhiều topic)</span></label>
+                <div class="flex flex-wrap items-center gap-3">
+                    <span id="openAlexBackfillStatus" class="text-xs text-slate-500" role="status" aria-live="polite"></span>
+                    <button type="button" onclick="clearOpenAlexFilters()" class="text-xs font-semibold text-blue-700 hover:text-blue-900">Xóa lọc taxonomy</button>
+                </div>
+            </div>
+        </section>
 
         <!-- Toolbar -->
         <div class="library-toolbar bg-white p-3 rounded-t-xl border border-slate-200 border-b-0 flex flex-col sm:flex-row gap-3 items-center justify-between">
@@ -1348,12 +1387,14 @@
 
         let allPapers = [];
         let selectedDois = new Set();
+        let openAlexPollTimer = null;
 
         async function loadPapers() {
             document.getElementById('papersBody').innerHTML = `<tr><td colspan="5" class="p-8 text-center text-slate-400"><svg class="w-8 h-8 animate-spin mx-auto mb-2" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>Đang tải dữ liệu...</td></tr>`;
             try {
                 const res = await fetch('/api/downloaded-papers');
                 const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'Không thể tải danh sách bài báo.');
                 allPapers = data.papers || [];
                 
                 // Update Badge in Nav
@@ -1361,6 +1402,8 @@
                 if (badge) badge.textContent = allPapers.length;
 
                 document.getElementById('metricTotal').textContent = allPapers.length;
+                refreshOpenAlexFilters();
+                updateOpenAlexCoverage();
                 
                 if (allPapers.length === 0) {
                     document.getElementById('emptyState').classList.remove('hidden');
@@ -1369,28 +1412,190 @@
                     document.getElementById('emptyState').classList.add('hidden');
                     filterTable();
                 }
+                void pollOpenAlexBackfill(false);
             } catch (error) {
                 console.error('Error loading papers', error);
                 document.getElementById('papersBody').innerHTML = `<tr><td colspan="5" class="p-8 text-center text-red-500">Lỗi kết nối khi tải danh sách.</td></tr>`;
             }
         }
 
-        function filterTable() {
+        const openAlexFilterLevels = [
+            { id: 'openAlexDomainFilter', key: 'domainId', label: 'domain', placeholder: 'Tất cả Domain' },
+            { id: 'openAlexFieldFilter', key: 'fieldId', label: 'field', placeholder: 'Tất cả Field' },
+            { id: 'openAlexSubfieldFilter', key: 'subfieldId', label: 'subfield', placeholder: 'Tất cả Subfield' },
+            { id: 'openAlexTopicFilter', key: 'id', label: 'label', placeholder: 'Tất cả Topic' },
+        ];
+
+        function openAlexAssignments(paper) {
+            const artifact = paper.openalex_classification || {};
+            if (artifact.status !== 'MATCHED') return [];
+            const topics = artifact.provenance?.topics;
+            if (!Array.isArray(topics)) return [];
+            if (document.getElementById('openAlexIncludeSecondary')?.checked) return topics;
+            const primaryId = artifact.classification?.primaryTopicId;
+            return primaryId ? topics.filter(topic => topic.id === primaryId) : [];
+        }
+
+        function selectedOpenAlexValues() {
+            return openAlexFilterLevels.map(level => document.getElementById(level.id)?.value || '');
+        }
+
+        function refreshOpenAlexFilters() {
+            if (!document.getElementById('openAlexDomainFilter')) return;
+            const selected = selectedOpenAlexValues();
+            const assignments = allPapers.flatMap(paper => openAlexAssignments(paper)
+                .map(topic => ({ topic, doi: paper.doi })));
+            openAlexFilterLevels.forEach((level, index) => {
+                const select = document.getElementById(level.id);
+                const parentValue = index ? selected[index - 1] : '';
+                const parentKey = index ? openAlexFilterLevels[index - 1].key : '';
+                const options = new Map();
+                assignments.forEach(({ topic, doi }) => {
+                    if (parentValue && topic[parentKey] !== parentValue) return;
+                    const id = topic[level.key];
+                    const label = topic[level.label];
+                    if (!id || !label) return;
+                    if (!options.has(id)) options.set(id, { label, papers: new Set() });
+                    if (doi) options.get(id).papers.add(doi);
+                });
+                const value = selected[index] && options.has(selected[index]) ? selected[index] : '';
+                select.replaceChildren();
+                const placeholder = document.createElement('option');
+                placeholder.value = '';
+                placeholder.textContent = level.placeholder;
+                select.append(placeholder);
+                [...options.entries()].sort((a, b) => a[1].label.localeCompare(b[1].label)).forEach(([id, item]) => {
+                    const option = document.createElement('option');
+                    option.value = id;
+                    option.textContent = `${item.label} · ${item.papers.size}`;
+                    select.append(option);
+                });
+                select.value = value;
+                select.disabled = index > 0 && !parentValue;
+                selected[index] = value;
+            });
+        }
+
+        function onOpenAlexFilterChange(level) {
+            if (level >= 0) {
+                openAlexFilterLevels.slice(level + 1).forEach(item => {
+                    document.getElementById(item.id).value = '';
+                });
+            }
+            refreshOpenAlexFilters();
+            filterTable();
+        }
+
+        function clearOpenAlexFilters() {
+            openAlexFilterLevels.forEach(level => { document.getElementById(level.id).value = ''; });
+            document.getElementById('openAlexIncludeSecondary').checked = false;
+            document.getElementById('openAlexSort').value = 'recent';
+            refreshOpenAlexFilters();
+            filterTable();
+        }
+
+        function matchesOpenAlexFilters(paper) {
+            const selected = selectedOpenAlexValues();
+            if (!selected.some(Boolean)) return true;
+            return openAlexAssignments(paper).some(topic => openAlexFilterLevels.every((level, index) =>
+                !selected[index] || String(topic[level.key] || '') === selected[index]
+            ));
+        }
+
+        function matchesLibraryFilters(paper) {
             const query = (document.getElementById('searchInput').value || '').toLowerCase();
             const source = document.getElementById('sourceFilter').value;
-            
-            const filtered = allPapers.filter(p => {
-                const qMatch = p.title.toLowerCase().includes(query) || 
-                               p.doi.toLowerCase().includes(query) || 
-                               p.filename.toLowerCase().includes(query) ||
-                               p.authors.toLowerCase().includes(query);
-                
-                let sMatch = true;
-                if (source === 'oa') sMatch = p.source === 'oa' || p.source === 'public_copy' || p.provider === 'Generic';
-                else if (source === 'vnu') sMatch = p.source === 'vnu' || p.provider === 'Elsevier' || p.provider === 'IEEE';
-                
-                return qMatch && sMatch;
-            });
+            const qMatch = [paper.title, paper.doi, paper.filename, paper.authors]
+                .some(value => String(value || '').toLowerCase().includes(query));
+            let sMatch = true;
+            if (source === 'oa') sMatch = paper.source === 'oa' || paper.source === 'public_copy' || paper.provider === 'Generic';
+            else if (source === 'vnu') sMatch = paper.source === 'vnu' || paper.provider === 'Elsevier' || paper.provider === 'IEEE';
+            return qMatch && sMatch && matchesOpenAlexFilters(paper);
+        }
+
+        function primaryOpenAlexTopic(paper) {
+            const artifact = paper.openalex_classification || {};
+            const primaryId = artifact.classification?.primaryTopicId;
+            return (artifact.provenance?.topics || []).find(topic => topic.id === primaryId) || null;
+        }
+
+        function updateOpenAlexCoverage() {
+            const element = document.getElementById('openAlexCoverage');
+            if (!element) return;
+            const matched = allPapers.filter(paper => paper.openalex_classification?.status === 'MATCHED').length;
+            const unmatched = allPapers.length - matched;
+            element.textContent = `${matched}/${allPapers.length} bài có OpenAlex Topics${unmatched ? ` · ${unmatched} bài chưa có kết quả` : ''}. Mặc định dùng primary topic để tránh xếp trùng.`;
+        }
+
+        function showOpenAlexBackfillState(state) {
+            const button = document.getElementById('openAlexBackfillButton');
+            const status = document.getElementById('openAlexBackfillStatus');
+            const running = state?.status === 'running';
+            button.disabled = running;
+            button.textContent = running ? 'Đang cập nhật…' : 'Cập nhật OpenAlex';
+            if (running) {
+                const current = state.current_doi ? ` · ${state.current_doi}` : '';
+                status.textContent = `${state.processed}/${state.total} · ${state.matched} có topic · ${state.not_found} không có · ${state.unavailable} lỗi${current}`;
+            } else if (state?.status === 'failed') {
+                status.textContent = state.message || 'Cập nhật dừng do lỗi.';
+            } else if (state?.status === 'completed' && state.total) {
+                status.textContent = `Hoàn tất: ${state.matched} có topic · ${state.not_found} không có · ${state.unavailable} lỗi.`;
+            } else if (state?.message) {
+                status.textContent = state.message;
+            }
+        }
+
+        async function pollOpenAlexBackfill(reloadWhenDone = true) {
+            if (openAlexPollTimer) clearTimeout(openAlexPollTimer);
+            try {
+                const response = await fetch('/api/openalex/backfill');
+                const payload = await response.json();
+                if (!response.ok) throw new Error(payload.error || 'Không lấy được trạng thái OpenAlex.');
+                const state = payload.state || {};
+                showOpenAlexBackfillState(state);
+                if (state.status === 'running') {
+                    openAlexPollTimer = setTimeout(() => pollOpenAlexBackfill(reloadWhenDone), 1200);
+                } else if (reloadWhenDone && state.status === 'completed' && state.total) {
+                    await loadPapers();
+                }
+            } catch (error) {
+                document.getElementById('openAlexBackfillStatus').textContent = error.message;
+            }
+        }
+
+        async function startOpenAlexBackfill() {
+            const button = document.getElementById('openAlexBackfillButton');
+            button.disabled = true;
+            try {
+                const response = await fetch('/api/openalex/backfill', { method: 'POST' });
+                const payload = await response.json();
+                if (response.status === 409 && payload.state) {
+                    showOpenAlexBackfillState(payload.state);
+                    void pollOpenAlexBackfill(true);
+                    return;
+                }
+                if (!response.ok) throw new Error(payload.error || 'Không thể cập nhật OpenAlex.');
+                const state = payload.state || {};
+                showOpenAlexBackfillState(state);
+                if (state.status === 'running') void pollOpenAlexBackfill(true);
+                else if (state.total === 0) await loadPapers();
+            } catch (error) {
+                button.disabled = false;
+                document.getElementById('openAlexBackfillStatus').textContent = error.message;
+            }
+        }
+
+        function filterTable() {
+            const filtered = allPapers.filter(matchesLibraryFilters);
+            if (document.getElementById('openAlexSort')?.value === 'taxonomy') {
+                filtered.sort((a, b) => {
+                    const path = paper => {
+                        const topic = primaryOpenAlexTopic(paper);
+                        return topic ? [topic.domain, topic.field, topic.subfield, topic.label].filter(Boolean).join(' / ') : '\uffff';
+                    };
+                    return path(a).localeCompare(path(b)) || String(a.title || a.doi).localeCompare(String(b.title || b.doi));
+                });
+            }
             renderTable(filtered);
         }
 
@@ -1425,6 +1630,19 @@
                         <span class="text-[10px] font-semibold px-1.5 py-0.5 rounded ${p.provider==='Elsevier'?'bg-orange-100 text-orange-700': p.provider==='IEEE'?'bg-blue-100 text-blue-800': 'bg-slate-100 text-slate-600'}">${p.provider}</span>
                     </div>
                 `;
+
+                const openAlexTopic = primaryOpenAlexTopic(p);
+                const taxonomyLine = document.createElement('div');
+                taxonomyLine.className = 'mt-2 text-[11px] leading-4';
+                if (openAlexTopic) {
+                    taxonomyLine.classList.add('text-blue-800');
+                    taxonomyLine.textContent = [openAlexTopic.domain, openAlexTopic.field, openAlexTopic.subfield, openAlexTopic.label].filter(Boolean).join(' › ');
+                } else {
+                    taxonomyLine.classList.add('text-slate-400');
+                    const status = p.openalex_classification?.status || 'NOT_ANALYZED';
+                    taxonomyLine.textContent = status === 'NOT_FOUND' ? 'OpenAlex chưa gán topic' : status === 'UNAVAILABLE' ? 'OpenAlex tạm thời không khả dụng' : 'Chưa cập nhật OpenAlex';
+                }
+                tdInfo.append(taxonomyLine);
 
                 const tdFile = document.createElement('td');
                 tdFile.className = "p-4 align-top break-all";
@@ -1501,16 +1719,7 @@
         }
 
         function getVisiblePapers() {
-            // Re-apply filter logic to get currently visible
-            const query = (document.getElementById('searchInput').value || '').toLowerCase();
-            const source = document.getElementById('sourceFilter').value;
-            return allPapers.filter(p => {
-                const qMatch = p.title.toLowerCase().includes(query) || p.doi.toLowerCase().includes(query) || p.filename.toLowerCase().includes(query) || p.authors.toLowerCase().includes(query);
-                let sMatch = true;
-                if (source === 'oa') sMatch = p.source === 'oa' || p.source === 'public_copy' || p.provider === 'Generic';
-                else if (source === 'vnu') sMatch = p.source === 'vnu' || p.provider === 'Elsevier' || p.provider === 'IEEE';
-                return qMatch && sMatch;
-            });
+            return allPapers.filter(matchesLibraryFilters);
         }
 
         // --- Custom Dropdown Logic ---
@@ -1928,94 +2137,6 @@
             }
         }
 
-        function openSlrConfigModal() {
-            document.getElementById('cfgBaseUrl').value = slrConfig.base_url || 'http://127.0.0.1:5000';
-            document.getElementById('cfgApiKey').value = '';
-            document.getElementById('cfgDefaultProj').value = slrConfig.default_project_id || '';
-            document.getElementById('cfgApiKeyNote').textContent = slrConfig.has_api_key 
-                ? `Đã cấu hình khóa bảo mật bí mật (${slrConfig.api_key_masked || 'Đã kích hoạt'}). Nhập mới nếu muốn thay đổi.` 
-                : 'Chưa có SLR API key. Nhập key được cấp đúng scope.';
-            
-            const testResult = document.getElementById('testConnResult');
-            testResult.classList.add('hidden');
-
-            const modal = document.getElementById('slrConfigModal');
-            const content = document.getElementById('slrConfigModalContent');
-            modal.classList.remove('hidden');
-            setTimeout(() => {
-                modal.classList.remove('opacity-0');
-                content.classList.remove('scale-95');
-                content.classList.add('scale-100');
-            }, 10);
-        }
-
-        function closeSlrConfigModal() {
-            const modal = document.getElementById('slrConfigModal');
-            const content = document.getElementById('slrConfigModalContent');
-            modal.classList.add('opacity-0');
-            content.classList.remove('scale-100');
-            content.classList.add('scale-95');
-            setTimeout(() => modal.classList.add('hidden'), 200);
-        }
-
-        async function testSlrConnection() {
-            const btn = document.getElementById('btnTestConn');
-            const resultBox = document.getElementById('testConnResult');
-            const orig = btn.innerHTML;
-            btn.innerHTML = `<span class="pulse-loading">Đang kiểm tra...</span>`;
-            btn.disabled = true;
-
-            try {
-                const res = await fetch('/api/slr/projects');
-                const data = await res.json();
-                resultBox.classList.remove('hidden', 'bg-rose-50', 'text-rose-700', 'border-rose-200', 'bg-emerald-50', 'text-emerald-700', 'border-emerald-200');
-
-                if (data.success) {
-                    resultBox.classList.add('bg-emerald-50', 'text-emerald-800', 'border-emerald-200');
-                    resultBox.innerHTML = `✓ Kết nối thành công! Tìm thấy <b>${data.projects.length}</b> dự án từ máy chủ SLR Backend.`;
-                } else {
-                    resultBox.classList.add('bg-rose-50', 'text-rose-800', 'border-rose-200');
-                    resultBox.innerHTML = `✗ Lỗi: ${data.error || 'Không thể xác thực API Key'}`;
-                }
-            } catch (e) {
-                resultBox.classList.remove('hidden');
-                resultBox.className = 'p-3 rounded-xl border text-xs bg-rose-50 text-rose-800 border-rose-200';
-                resultBox.innerHTML = `✗ Không thể kết nối tới server: ${e.message}`;
-            } finally {
-                btn.innerHTML = orig;
-                btn.disabled = false;
-            }
-        }
-
-        async function saveSlrConfig() {
-            const baseUrl = document.getElementById('cfgBaseUrl').value.trim();
-            const apiKey = document.getElementById('cfgApiKey').value.trim();
-            const defaultProj = document.getElementById('cfgDefaultProj').value.trim();
-
-            try {
-                const res = await fetch('/api/slr/config', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        base_url: baseUrl,
-                        api_key: apiKey,
-                        default_project_id: defaultProj
-                    })
-                });
-                const data = await res.json();
-                if (data.success) {
-                    showToast('✓ Đã lưu cấu hình kết nối SLR System thành công!', true);
-                    closeSlrConfigModal();
-                    await fetchSlrConfig();
-                    await loadSlrProjects();
-                } else {
-                    alert(data.error || 'Lỗi lưu cấu hình.');
-                }
-            } catch (e) {
-                alert('Lỗi lưu cấu hình: ' + e.message);
-            }
-        }
-
         function previewPayload() {
             const selectedItems = allPapers.filter(p => selectedDois.has(p.doi));
             const projId = selectedProjectId || 'CHƯA_CHỌN_DỰ_ÁN';
@@ -2072,8 +2193,7 @@
 
         async function startPushToProject() {
             if (selectedDestination === 'repository' && !slrConfig.has_api_key) {
-                alert('Configure the SLR API key and grant the required permissions to that API client.');
-                openSlrConfigModal();
+                window.location.href = '/settings';
                 return;
             }
             if (selectedDestination === 'project' && !selectedProjectId) {
@@ -2376,53 +2496,6 @@
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
                     <span>🚀 Đẩy lên Dự án SLR</span>
                 </button>
-            </div>
-        </div>
-    </div>
-
-    <!-- SLR Config Modal -->
-    <div id="slrConfigModal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center hidden opacity-0 transition-opacity">
-        <div class="bg-white rounded-2xl w-full max-w-lg p-6 m-4 custom-shadow transform scale-95 transition-transform" id="slrConfigModalContent">
-            <div class="flex justify-between items-center mb-4 pb-3 border-b border-slate-100">
-                <div class="flex items-center gap-2.5">
-                    <div class="w-8 h-8 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold text-sm">⚙️</div>
-                    <h3 class="font-bold text-base text-slate-800">Cấu hình kết nối SLR System</h3>
-                </div>
-                <button onclick="closeSlrConfigModal()" class="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 cursor-pointer">
-                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
-                </button>
-            </div>
-            
-            <div class="space-y-4 text-xs">
-                <div>
-                    <label class="block font-semibold text-slate-700 mb-1">Địa chỉ SLR Backend (Base URL)</label>
-                    <input type="text" id="cfgBaseUrl" placeholder="http://127.0.0.1:5000" class="w-full text-xs px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 font-mono">
-                    <p class="text-[11px] text-slate-400 mt-1">Mặc định: http://127.0.0.1:5000 (Backend Node/Express)</p>
-                </div>
-
-                <div>
-                    <label class="block font-semibold text-slate-700 mb-1">SLR API key (X-API-Key)</label>
-                    <input type="password" id="cfgApiKey" placeholder="Nhập API Key mới hoặc để trống nếu không đổi" class="w-full text-xs px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 font-mono">
-                    <p class="text-[11px] text-slate-400 mt-1" id="cfgApiKeyNote">Một key dùng cho upload theo quyền được cấp: project, phân tích và Kho chung.</p>
-                </div>
-
-                <div>
-                    <label class="block font-semibold text-slate-700 mb-1">Mã dự án mặc định (Tùy chọn)</label>
-                    <input type="text" id="cfgDefaultProj" placeholder="Mã dự án (nếu muốn ghim cố định)" class="w-full text-xs px-3 py-2 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 font-mono">
-                </div>
-
-                <div id="testConnResult" class="p-3 rounded-xl border text-xs hidden"></div>
-            </div>
-
-            <div class="mt-6 flex items-center justify-between pt-3 border-t border-slate-100">
-                <button type="button" onclick="testSlrConnection()" id="btnTestConn" class="px-3.5 py-2 text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer">
-                    <svg class="w-3.5 h-3.5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
-                    <span>Kiểm tra kết nối</span>
-                </button>
-                <div class="flex gap-2">
-                    <button type="button" onclick="closeSlrConfigModal()" class="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-lg cursor-pointer">Đóng</button>
-                    <button type="button" onclick="saveSlrConfig()" class="px-4 py-2 text-xs font-semibold bg-indigo-600 text-white hover:bg-indigo-700 rounded-lg shadow-sm cursor-pointer">Lưu cấu hình</button>
-                </div>
             </div>
         </div>
     </div>

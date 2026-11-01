@@ -3,6 +3,7 @@
 import json
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote, urlparse
 
@@ -44,6 +45,82 @@ def check_openalex(doi):
         return {"urls": urls, "title": data.get("title") or "", "source": "OpenAlex / kho toàn văn công khai"}
     except (requests.RequestException, ValueError, AttributeError, TypeError):
         return {}
+
+
+def fetch_openalex_classification(doi, openalex_id=None):
+    """Return OpenAlex's per-work topic hierarchy for SLR's existing filters."""
+    settings.refresh_api_credentials()
+    doi = re.sub(r"^https?://(?:dx\.)?doi\.org/", "", str(doi or "").strip(), flags=re.IGNORECASE)
+    openalex_id = str(openalex_id or "").strip()
+    if not doi and not re.fullmatch(r"https?://openalex\.org/W\d+|W\d+", openalex_id, re.IGNORECASE):
+        return {"status": "NO_IDENTIFIER"}
+    work_id = openalex_id or ("https://doi.org/" + doi)
+    headers = {"Accept": "application/json"}
+    if settings.OPENALEX_API_KEY:
+        headers["Authorization"] = "Bearer " + settings.OPENALEX_API_KEY
+    try:
+        url = "https://api.openalex.org/works/" + quote(work_id, safe="")
+        with polite_get(url, headers=headers, timeout=12) as response:
+            if response.status_code != 200:
+                return {"status": "NOT_FOUND" if response.status_code == 404 else "UNAVAILABLE"}
+            work = response.json()
+    except (requests.RequestException, ValueError, AttributeError, TypeError):
+        return {"status": "UNAVAILABLE"}
+
+    resolved_doi = re.sub(r"^https?://(?:dx\.)?doi\.org/", "", str(work.get("doi") or "").strip(), flags=re.IGNORECASE)
+    if doi and resolved_doi.casefold() != doi.casefold():
+        return {"status": "NOT_FOUND"}
+    primary = work.get("primary_topic") if isinstance(work.get("primary_topic"), dict) else {}
+    topics = work.get("topics") if isinstance(work.get("topics"), list) else []
+    topics = [topic for topic in topics if isinstance(topic, dict) and isinstance(topic.get("id"), str)]
+    if isinstance(primary.get("id"), str) and all(topic.get("id") != primary["id"] for topic in topics):
+        topics = [primary] + topics
+    topics = topics[:20]
+    if not topics:
+        return {"status": "NOT_FOUND"}
+    primary_topic_id = primary.get("id") if isinstance(primary.get("id"), str) else None
+
+    def unique_ids(key):
+        return list(dict.fromkeys(
+            item[key]["id"] for item in topics
+            if isinstance(item.get(key), dict) and isinstance(item[key].get("id"), str)
+        ))
+
+    classification = {
+        "primaryTopicId": primary_topic_id,
+        "topicIds": list(dict.fromkeys(topic["id"] for topic in topics)),
+        "subfieldIds": unique_ids("subfield"),
+        "fieldIds": unique_ids("field"),
+        "domainIds": unique_ids("domain"),
+    }
+    classification = {key: value for key, value in classification.items() if value}
+    return {
+        "status": "MATCHED",
+        "classification": classification,
+        "openAlexId": work.get("id"),
+        "classificationProvenance": {
+            "source": "OPENALEX_TOPICS",
+            "workId": work.get("id"),
+            "retrievedAt": datetime.now(timezone.utc).isoformat(),
+            "topics": [{
+                "id": topic.get("id"),
+                "label": topic.get("display_name"),
+                "score": topic.get("score"),
+                "subfieldId": (topic.get("subfield") or {}).get("id")
+                if isinstance(topic.get("subfield"), dict) else None,
+                "subfield": (topic.get("subfield") or {}).get("display_name")
+                if isinstance(topic.get("subfield"), dict) else None,
+                "fieldId": (topic.get("field") or {}).get("id")
+                if isinstance(topic.get("field"), dict) else None,
+                "field": (topic.get("field") or {}).get("display_name")
+                if isinstance(topic.get("field"), dict) else None,
+                "domainId": (topic.get("domain") or {}).get("id")
+                if isinstance(topic.get("domain"), dict) else None,
+                "domain": (topic.get("domain") or {}).get("display_name")
+                if isinstance(topic.get("domain"), dict) else None,
+            } for topic in topics[:20]],
+        },
+    }
 
 
 def check_pmc(doi):

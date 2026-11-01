@@ -18,6 +18,19 @@ STATES = {
     "DOWNLOADED", "FAILED", "CANCELLED", "PURCHASE_REQUIRED",
 }
 
+def valid_analysis_source(path):
+    source = Path(path or "")
+    if not source.is_file():
+        return False
+    if source.suffix.lower() == ".pdf":
+        return valid_pdf_file(source)
+    if source.suffix.lower() in {".md", ".markdown"}:
+        try:
+            return bool(source.read_text(encoding="utf-8").strip())
+        except (OSError, UnicodeDecodeError):
+            return False
+    return False
+
 
 def remap_outline_source_ids(value, section_id_map, paragraph_id_map):
     """Remap source references in nested analysis payloads without changing structure IDs."""
@@ -234,7 +247,7 @@ class PaperStore:
 
     def downloaded(self, doi):
         record = self.get(doi)
-        return record if record and record["status"] == "DOWNLOADED" and valid_pdf_file(record["file_path"] or "") else None
+        return record if record and record["status"] == "DOWNLOADED" and valid_analysis_source(record["file_path"] or "") else None
 
     def file_owner(self, path):
         with self.connect() as db:
@@ -282,6 +295,57 @@ class PaperStore:
                 draft=COALESCE(excluded.draft,paper_analyses.draft), error=excluded.error,
                 stage=excluded.stage, updated_at=excluded.updated_at""",
                 (doi, status, provider, model, serialized, error, now, now, stage))
+
+    def update_saffron_analysis(self, doi, saffron_analysis):
+        """Update only the SAFFRON artifact on an already completed AI analysis."""
+        now = datetime.now(timezone.utc).isoformat()
+        with self.connect() as db:
+            row = db.execute("SELECT status,draft FROM paper_analyses WHERE doi=?", (doi,)).fetchone()
+            if not row or row["status"] != "DONE":
+                return False
+            try:
+                draft = json.loads(row["draft"] or "{}")
+            except (TypeError, ValueError):
+                return False
+            if not isinstance(draft, dict):
+                return False
+            draft["saffron_analysis"] = saffron_analysis
+            cursor = db.execute(
+                "UPDATE paper_analyses SET draft=?,updated_at=? WHERE doi=? AND status='DONE'",
+                (json.dumps(draft, ensure_ascii=False), now, doi),
+            )
+            return cursor.rowcount == 1
+
+    def update_openalex_classification(self, doi, classification):
+        """Persist OpenAlex classification without replacing paper or AI analysis data."""
+        now = datetime.now(timezone.utc).isoformat()
+        with self.connect() as db:
+            paper = db.execute("SELECT metadata FROM papers WHERE doi=?", (doi,)).fetchone()
+            if not paper:
+                return False
+            try:
+                metadata = json.loads(paper["metadata"] or "{}")
+            except (TypeError, ValueError):
+                metadata = {}
+            if not isinstance(metadata, dict):
+                metadata = {}
+            metadata["openalex_classification"] = classification
+            if classification.get("openAlexId"):
+                metadata["openAlexId"] = classification["openAlexId"]
+            db.execute("UPDATE papers SET metadata=? WHERE doi=?",
+                       (json.dumps(metadata, ensure_ascii=False), doi))
+
+            analysis = db.execute("SELECT status,draft FROM paper_analyses WHERE doi=?", (doi,)).fetchone()
+            if analysis and analysis["status"] == "DONE":
+                try:
+                    draft = json.loads(analysis["draft"] or "{}")
+                except (TypeError, ValueError):
+                    draft = {}
+                if isinstance(draft, dict):
+                    draft["openalex_classification"] = classification
+                    db.execute("UPDATE paper_analyses SET draft=?,updated_at=? WHERE doi=? AND status='DONE'",
+                               (json.dumps(draft, ensure_ascii=False), now, doi))
+            return True
 
     def try_queue_analysis(self, doi, provider, *, allow_done=False):
         now = datetime.now(timezone.utc).isoformat()

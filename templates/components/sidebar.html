@@ -22,6 +22,10 @@
         <span>Paper Library</span>
         <span id="navDownloadedBadge" class="ml-auto rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-bold text-blue-700">...</span>
       </a>
+      <a id="navTabRepository" href="/repository" {% if sidebar_workspace_mode|default(false) %}onclick="switchTab(event, 'repository')"{% endif %} {% if sidebar_active_tab == 'repository' %}aria-current="page"{% endif %} class="flex items-center gap-3 rounded-xl px-3.5 py-2.5 text-xs font-semibold transition-all {% if sidebar_active_tab == 'repository' %}border border-emerald-100 bg-emerald-50 font-bold text-emerald-700{% else %}text-slate-600 hover:bg-slate-100/70 hover:text-slate-900{% endif %}">
+        <span id="navIconRepository" class="flex h-7 w-7 items-center justify-center rounded-lg {% if sidebar_active_tab == 'repository' %}bg-emerald-600 text-white{% else %}bg-slate-100 text-slate-500{% endif %}" aria-hidden="true"><svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6.5A2.5 2.5 0 016.5 4H18l2 2v11.5a2.5 2.5 0 01-2.5 2.5h-11A2.5 2.5 0 014 17.5zM8 9h8M8 13h8M8 17h5"/></svg></span>
+        <span>SLR shared inbox</span>
+      </a>
       <a href="/analysis" {% if sidebar_active_tab == 'analysis' %}aria-current="page"{% endif %} class="flex items-center gap-3 rounded-xl px-3.5 py-2.5 text-xs font-semibold transition-all {% if sidebar_active_tab == 'analysis' %}border border-violet-100/80 bg-violet-50 font-bold text-violet-700 shadow-sm shadow-violet-500/5{% else %}text-slate-600 hover:bg-slate-100/70 hover:text-slate-900{% endif %}">
         <span id="navIconAnalysis" class="flex h-7 w-7 items-center justify-center rounded-lg {% if sidebar_active_tab == 'analysis' %}bg-violet-600 text-white shadow-sm shadow-violet-500/20{% else %}bg-slate-100 text-slate-500{% endif %}" aria-hidden="true"><svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3l1.5 6.5L20 12l-6.5 1.5L12 20l-1.5-6.5L4 12l6.5-2.5L12 3z"/></svg></span><span>AI Analysis</span>
       </a>

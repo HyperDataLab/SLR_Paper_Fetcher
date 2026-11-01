@@ -65,6 +65,19 @@ def download_path(folder, name, suffix=".pdf"):
     return path
 
 
+def valid_pdf_bytes(content):
+    if not isinstance(content, (bytes, bytearray, memoryview)):
+        return False
+    content = memoryview(content)
+    header = bytes(content[:1024])
+    tail = bytes(content[-4096:])
+    return _valid_pdf_parts(header, tail, content.nbytes)
+
+
+def _valid_pdf_parts(header, tail, size):
+    return size >= 32 and b"%PDF-" in header and b"%%EOF" in tail and not header.lstrip().startswith(b"<")
+
+
 def valid_pdf_file(path):
     try:
         path = Path(path)
@@ -75,7 +88,7 @@ def valid_pdf_file(path):
             header = stream.read(1024)
             stream.seek(max(0, size - 4096))
             tail = stream.read()
-        return b"%PDF-" in header and b"%%EOF" in tail and not header.lstrip().startswith(b"<")
+        return _valid_pdf_parts(header, tail, size)
     except OSError:
         return False
 

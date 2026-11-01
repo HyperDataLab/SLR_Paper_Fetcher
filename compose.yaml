@@ -10,12 +10,16 @@ services:
     depends_on:
       - grobid
       - ollama
+      - saffron
     ports:
       - "127.0.0.1:${WEB_PORT:-8543}:8543"
     environment:
       APP_HOST: 0.0.0.0
       APP_PORT: 8543
       APP_ENV_FILE: /app/data/.env
+      SAFFRON_API_URL: http://saffron:8080
+      SAFFRON_MANAGED_BY_COMPOSE: "true"
+      SAFFRON_GIT_REF: ${SAFFRON_GIT_REF:-bcf009f176713ced1d707324043124670827125b}
       AUTO_OPEN_BROWSER: "false"
       DOWNLOAD_FOLDER: /app/downloads
       VNU_BROWSER_CHANNEL: chromium
@@ -57,8 +61,33 @@ services:
     volumes:
       - ollama-models:/root/.ollama
 
+  saffron:
+    build:
+      context: .
+      dockerfile: docker/saffron/Dockerfile
+      args:
+        SAFFRON_GIT_REF: ${SAFFRON_GIT_REF:-bcf009f176713ced1d707324043124670827125b}
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${SAFFRON_PORT:-8081}:8080"
+    volumes:
+      - saffron-models:/opt/saffron/models
+    environment:
+      SAFFRON_TAXONOMY_MODEL_PATH: ${SAFFRON_TAXONOMY_MODEL_PATH:-/opt/saffron/models/default.json}
+    healthcheck:
+      test:
+        - CMD
+        - curl
+        - -fsS
+        - http://127.0.0.1:8080/health
+      interval: 20s
+      timeout: 8s
+      retries: 5
+      start_period: 30s
+
 volumes:
   app-data:
   paper-downloads:
   browser-profile:
   ollama-models:
+  saffron-models:

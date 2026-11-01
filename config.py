@@ -29,6 +29,15 @@ class Settings:
     GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "").strip()
     GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-2.5-flash").strip()
 
+    # SAFFRON paper-level term and taxonomy enrichment service.
+    SAFFRON_API_URL: str = os.getenv("SAFFRON_API_URL", "http://127.0.0.1:8081").rstrip("/")
+    SAFFRON_ENABLED: bool = os.getenv("SAFFRON_ENABLED", "true").lower() in ("true", "1", "yes")
+    SAFFRON_AUTO_START: bool = os.getenv("SAFFRON_AUTO_START", "true").lower() in ("true", "1", "yes")
+    SAFFRON_MANAGED_BY_COMPOSE: bool = os.getenv("SAFFRON_MANAGED_BY_COMPOSE", "false").lower() in ("true", "1", "yes")
+    SAFFRON_STARTUP_TIMEOUT_SECONDS: int = max(10, int(os.getenv("SAFFRON_STARTUP_TIMEOUT_SECONDS", "300")))
+    SAFFRON_RUN_TIMEOUT_SECONDS: int = max(30, int(os.getenv("SAFFRON_RUN_TIMEOUT_SECONDS", "900")))
+    SAFFRON_GIT_REF: str = os.getenv("SAFFRON_GIT_REF", "bcf009f176713ced1d707324043124670827125b").strip() or "bcf009f176713ced1d707324043124670827125b"
+
     def refresh_api_credentials(self):
         """Apply .env API-key edits without retaining a previously loaded key."""
         values = dotenv_values(ENV_PATH) if ENV_PATH.exists() else {}
