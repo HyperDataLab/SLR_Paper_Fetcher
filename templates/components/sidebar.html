@@ -10,6 +10,7 @@
     </button>
   </div>
   <div class="flex-1 overflow-y-auto px-3 py-5">
+    {% if not setup_required|default(false) %}
     <p class="mb-2 px-3 text-[11px] font-semibold text-slate-500">Workspace</p>
     <nav aria-label="Main navigation" class="space-y-1.5">
       <a id="navTabFetch" href="/" {% if sidebar_workspace_mode|default(false) %}onclick="switchTab(event, 'fetch')"{% endif %} {% if sidebar_active_tab == 'fetch' %}aria-current="page"{% endif %} class="flex items-center gap-3 rounded-xl px-3.5 py-2.5 text-xs font-semibold transition-all {% if sidebar_active_tab == 'fetch' %}border border-blue-100/80 bg-blue-50 font-bold text-blue-700 shadow-sm shadow-blue-500/5{% else %}text-slate-600 hover:bg-slate-100/70 hover:text-slate-900{% endif %}">
@@ -26,12 +27,13 @@
         <span id="navIconRepository" class="flex h-7 w-7 items-center justify-center rounded-lg {% if sidebar_active_tab == 'repository' %}bg-emerald-600 text-white{% else %}bg-slate-100 text-slate-500{% endif %}" aria-hidden="true"><svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6.5A2.5 2.5 0 016.5 4H18l2 2v11.5a2.5 2.5 0 01-2.5 2.5h-11A2.5 2.5 0 014 17.5zM8 9h8M8 13h8M8 17h5"/></svg></span>
         <span>SLR shared inbox</span>
       </a>
-      <a href="/analysis" {% if sidebar_active_tab == 'analysis' %}aria-current="page"{% endif %} class="flex items-center gap-3 rounded-xl px-3.5 py-2.5 text-xs font-semibold transition-all {% if sidebar_active_tab == 'analysis' %}border border-violet-100/80 bg-violet-50 font-bold text-violet-700 shadow-sm shadow-violet-500/5{% else %}text-slate-600 hover:bg-slate-100/70 hover:text-slate-900{% endif %}">
+      <a id="navTabAnalysis" href="/analysis" {% if sidebar_active_tab == 'analysis' %}aria-current="page"{% endif %} class="flex items-center gap-3 rounded-xl px-3.5 py-2.5 text-xs font-semibold transition-all {% if sidebar_active_tab == 'analysis' %}border border-violet-100/80 bg-violet-50 font-bold text-violet-700 shadow-sm shadow-violet-500/5{% else %}text-slate-600 hover:bg-slate-100/70 hover:text-slate-900{% endif %}">
         <span id="navIconAnalysis" class="flex h-7 w-7 items-center justify-center rounded-lg {% if sidebar_active_tab == 'analysis' %}bg-violet-600 text-white shadow-sm shadow-violet-500/20{% else %}bg-slate-100 text-slate-500{% endif %}" aria-hidden="true"><svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3l1.5 6.5L20 12l-6.5 1.5L12 20l-1.5-6.5L4 12l6.5-2.5L12 3z"/></svg></span><span>AI Analysis</span>
       </a>
     </nav>
+    {% endif %}
     <section class="mt-6" aria-label="Shortcuts">
-      <p class="mb-2 px-3 text-[11px] font-semibold text-slate-500">Preferences</p>
+      {% if not setup_required|default(false) %}<p class="mb-2 px-3 text-[11px] font-semibold text-slate-500">Preferences</p>{% endif %}
       <div class="space-y-1">
         {% if sidebar_show_utilities|default(false) %}
         <button type="button" onclick="restoreSavedResults()" class="flex w-full items-center gap-3 rounded-xl px-3.5 py-2.5 text-left text-xs font-medium text-slate-600 transition-all hover:bg-slate-100/70 hover:text-slate-900"><span class="flex h-7 w-7 items-center justify-center rounded-lg bg-slate-100 text-slate-500" aria-hidden="true"><svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 014.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg></span><span>Restore saved list</span></button>
@@ -44,4 +46,8 @@
     {% if vnu_configured is defined %}<div class="rounded-xl border border-slate-200/70 bg-slate-50 p-3 text-xs"><div class="mb-1.5 flex items-center justify-between"><span class="font-semibold text-slate-700">VNU Library</span>{% if vnu_configured %}<span class="inline-flex items-center gap-1 rounded-full border border-emerald-100 bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700"><span class="h-1.5 w-1.5 rounded-full bg-emerald-500"></span>Connected</span>{% else %}<span class="inline-flex items-center gap-1 rounded-full border border-amber-100 bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-700"><span class="h-1.5 w-1.5 rounded-full bg-amber-500"></span>Not configured</span>{% endif %}</div><p class="text-[11px] text-slate-500">OpenAthens HCM</p></div>{% endif %}
     <div class="px-2 text-center text-[10px] font-medium text-slate-400">SLR Paper Fetcher</div>
   </div>
+  <style>
+    body:not([data-page="settings"]):not([data-slr-setup-checked="true"]) main { visibility: hidden; }
+  </style>
+  <script src="/static/js/slr-setup-gate.js?v=20261102-all-features"></script>
 </aside>

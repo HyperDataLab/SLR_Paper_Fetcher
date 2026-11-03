@@ -2133,7 +2133,7 @@
             if (!slrProjects || slrProjects.length === 0) {
                 list.innerHTML = `
                     <div class="p-4 text-center text-xs text-slate-400">
-                        Chưa có dự án nào từ backend hoặc máy chủ chưa sẵn sàng.
+                        No projects were returned. You can choose the shared repository or enter a project ID manually.
                     </div>
                 `;
                 return;
@@ -2575,8 +2575,11 @@
                 const action = hasAnalysis ? (hasClassification ? 'Đã hoàn tất' : 'Thử phân loại OpenAlex') : 'Tải về và phân tích';
                 article.innerHTML = `<div class="flex flex-wrap items-start justify-between gap-4"><div class="min-w-0"><h2 class="break-words font-semibold text-slate-900">${title}</h2><p class="mt-1 text-xs text-slate-500">${escapeRepositoryText(work.workId)}${doi}</p><div class="mt-3 flex flex-wrap gap-2">${badges}</div></div><button type="button" class="repository-process-button min-h-10 rounded-lg bg-blue-600 px-4 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60">${action}</button></div><p class="repository-process-status mt-3 hidden text-xs text-slate-600" aria-live="polite"></p>`;
                 const button = article.querySelector('button');
-                button.disabled = hasAnalysis && hasClassification;
-                button.addEventListener('click', () => processRepositoryWork(work, article));
+                if (hasAnalysis && hasClassification) {
+                    button.disabled = true;
+                } else {
+                    button.addEventListener('click', () => processRepositoryWork(work, article));
+                }
                 list.appendChild(article);
             });
         }

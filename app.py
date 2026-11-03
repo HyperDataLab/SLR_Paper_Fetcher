@@ -16,7 +16,7 @@ import requests
 from typing import List, Optional
 from urllib.parse import urlparse
 from fastapi import FastAPI, File, UploadFile, Request, Form
-from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, StreamingResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 import pandas as pd
@@ -74,8 +74,21 @@ async def _analysis_worker():
             from ai_analysis import analyze_markdown, analyze_pdf
             def report_stage(stage):
                 store.update_analysis_stage(doi, stage)
+            try:
+                from automatic_sources import fetch_openalex_classification
+                classification_doi = "" if str(doi).startswith("slrwork_") else doi
+                openalex_fields = await asyncio.to_thread(
+                    fetch_openalex_classification, classification_doi, metadata.get("openAlexId")
+                )
+            except Exception as exc:
+                print(f"[OPENALEX] Keyword lookup unavailable for {doi}: {exc}")
+                openalex_fields = {"status": "UNAVAILABLE", "keywords": []}
+            openalex_keywords = openalex_fields.get("keywords", []) if isinstance(openalex_fields, dict) else []
             analyzer = analyze_markdown if Path(paper["file_path"]).suffix.lower() in {".md", ".markdown"} else analyze_pdf
-            result, model = await asyncio.to_thread(analyzer, doi, paper["file_path"], provider, report_stage)
+            result, model = await asyncio.to_thread(
+                analyzer, doi, paper["file_path"], provider, report_stage,
+                openalex_keywords=openalex_keywords,
+            )
             if settings.SAFFRON_ENABLED:
                 store.update_analysis_stage(doi, "saffron_term_taxonomy")
                 try:
@@ -110,23 +123,11 @@ async def _analysis_worker():
                     "error": "SAFFRON is disabled in Fetcher settings.",
                     "terms": [], "taxonomy": {"status": "SKIPPED", "nodes": [], "edges": []},
                 }
-            try:
-                from automatic_sources import fetch_openalex_classification
-                classification_doi = "" if str(doi).startswith("slrwork_") else doi
-                openalex_fields = await asyncio.to_thread(
-                    fetch_openalex_classification, classification_doi, metadata.get("openAlexId")
-                )
-                result["openalex_classification"] = _openalex_classification_artifact(openalex_fields) or {
-                    "schema_version": "openalex-topics.v1",
-                    "status": (openalex_fields or {}).get("status", "NOT_FOUND"),
-                    "provenance": {"source": "OPENALEX_TOPICS"},
-                }
-            except Exception as exc:
-                print(f"[OPENALEX] Per-paper classification unavailable for {doi}: {exc}")
-                result["openalex_classification"] = {
-                    "schema_version": "openalex-topics.v1", "status": "UNAVAILABLE",
-                    "provenance": {"source": "OPENALEX_TOPICS"},
-                }
+            result["openalex_classification"] = _openalex_classification_artifact(openalex_fields) or {
+                "schema_version": "openalex-topics.v1",
+                "status": (openalex_fields or {}).get("status", "NOT_FOUND"),
+                "provenance": {"source": "OPENALEX_TOPICS"},
+            }
             result["argumentation"]["document"]["metadata"].update({
                 "paper_title": metadata.get("title") or doi,
                 "filename": paper.get("filename") or "",
@@ -242,6 +243,20 @@ app = FastAPI(title="SLR Paper Fetcher", lifespan=lifespan)
 os.makedirs("static", exist_ok=True)
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
+
+@app.middleware("http")
+async def require_slr_api_key_for_workspace(request: Request, call_next):
+    path = request.url.path
+    is_workspace_page = request.method == "GET" and (
+        path in {"/", "/upload", "/repository", "/analysis"}
+        or path.startswith("/analysis/paper/")
+    )
+    if is_workspace_page:
+        settings.refresh_api_credentials()
+        if not settings.SLR_API_KEY:
+            return RedirectResponse(url="/settings?setup=required", status_code=303)
+    return await call_next(request)
+
 def _publisher_url_from_message(message: str) -> Optional[str]:
     match = re.search(r"URL='([^']+)'", message or "")
     if not match:
@@ -298,8 +313,10 @@ async def analysis_page(request: Request):
 
 @app.get("/settings", response_class=HTMLResponse)
 async def settings_page(request: Request):
+    settings.refresh_api_credentials()
     return templates.TemplateResponse(request=request, name="settings.html", context={
         "active_tab": "settings",
+        "setup_required": not bool(settings.SLR_API_KEY),
         "vnu_configured": bool(settings.VNU_LIBRARY_ID and settings.VNU_LIBRARY_PASSWORD),
     })
 
@@ -1669,8 +1686,111 @@ async def update_slr_config(request: Request):
             }
     }
 
-@app.get("/api/slr/projects")
-async def get_slr_projects():
+def _slr_api_error_code(response):
+    try:
+        payload = response.json()
+    except ValueError:
+        return None
+    error = payload.get("error") if isinstance(payload, dict) else None
+    return error.get("code") if isinstance(error, dict) else None
+
+
+async def _probe_slr_api(base_url, api_key, method, path, json_body=None):
+    kwargs = {"headers": {"X-API-Key": api_key}, "timeout": 5}
+    if json_body is not None:
+        kwargs["json"] = json_body
+    return await asyncio.to_thread(requests.request, method, f"{base_url}{path}", **kwargs)
+
+
+def _probe_grants_scope(response, project_scope=False):
+    if response.status_code in (200, 400, 422):
+        return True
+    return project_scope and response.status_code == 403 and _slr_api_error_code(response) == "PROJECT_SCOPE_DENIED"
+
+
+async def _discover_slr_capabilities(base_url, api_key):
+    """Compatibility path for deployed SLR APIs predating GET /repository/capabilities.
+
+    Write probes intentionally omit required project IDs, files, and idempotency keys;
+    protected handlers reject them before creating or uploading anything.
+    """
+    works_path = "/api/public/v1/repository/works?limit=1"
+    repository_read, analysis_read, project_read, repository_write, project_write = await asyncio.gather(
+        _probe_slr_api(base_url, api_key, "GET", works_path),
+        _probe_slr_api(base_url, api_key, "GET", "/api/public/v1/repository/analysis-schemas"),
+        _probe_slr_api(base_url, api_key, "GET", "/api/public/papers/projects"),
+        _probe_slr_api(base_url, api_key, "POST", "/api/public/v1/repository/works/import", {}),
+        _probe_slr_api(base_url, api_key, "POST", "/api/public/papers/upload-pdf", {}),
+    )
+    if any(response.status_code == 401 for response in (repository_read, analysis_read, project_read, repository_write, project_write)):
+        return JSONResponse({"success": False, "error": "SLR API key không hợp lệ hoặc đã bị thu hồi (401 Unauthorized)."}, status_code=401)
+
+    scopes = set()
+    if repository_read.status_code == 200:
+        scopes.add("repository:read")
+    if analysis_read.status_code == 200:
+        scopes.add("analysis:read")
+    if project_read.status_code == 200:
+        scopes.add("project:read")
+    if _probe_grants_scope(repository_write):
+        scopes.add("repository:write")
+    if _probe_grants_scope(project_write):
+        scopes.add("project:write")
+
+    project_payload = {}
+    if project_read.status_code == 200:
+        try:
+            project_payload = project_read.json()
+        except ValueError:
+            project_payload = {}
+    project_rows = project_payload.get("data", []) if isinstance(project_payload, dict) else []
+    project_ids = sorted({
+        str(project.get("id") or project.get("projectId"))
+        for project in project_rows
+        if isinstance(project, dict) and (project.get("id") or project.get("projectId"))
+    }) if isinstance(project_rows, list) else []
+
+    analysis_project_id = (project_ids[0] if project_ids else settings.SLR_DEFAULT_PROJECT_ID) or "__slr_capability_probe__"
+    analysis_write = await _probe_slr_api(
+        base_url,
+        api_key,
+        "POST",
+        f"/api/public/projects/{requests.utils.quote(str(analysis_project_id), safe='')}/analysis-runs",
+        {},
+    )
+    if _probe_grants_scope(analysis_write, project_scope=True):
+        scopes.add("analysis:write")
+
+    works_payload = {}
+    if repository_read.status_code == 200:
+        try:
+            works_payload = repository_read.json()
+        except ValueError:
+            works_payload = {}
+    work_data = works_payload.get("data", {}) if isinstance(works_payload, dict) else {}
+    work_items = work_data.get("items", []) if isinstance(work_data, dict) else []
+    work_id = work_items[0].get("workId") if isinstance(work_items, list) and work_items and isinstance(work_items[0], dict) else None
+    if work_id:
+        artifact_probe = await _probe_slr_api(
+            base_url,
+            api_key,
+            "GET",
+            f"/api/public/v1/repository/works/{requests.utils.quote(str(work_id), safe='')}/artifacts/__slr_capability_probe__/download",
+        )
+        if artifact_probe.status_code in (400, 404):
+            scopes.add("artifacts:download")
+
+    return {
+        "success": True,
+        "message": "Connected using compatibility scope checks; the backend does not expose a capabilities endpoint.",
+        "scopes": sorted(scopes),
+        "allowed_project_ids": project_ids,
+        "project_grants_known": project_read.status_code == 200,
+        "capabilities_source": "compatibility-probes",
+    }
+
+
+async def _load_slr_capabilities():
     settings.refresh_api_credentials()
     base_url = settings.SLR_API_BASE_URL or "http://127.0.0.1:5000"
     api_key = settings.SLR_API_KEY
@@ -1680,31 +1800,95 @@ async def get_slr_projects():
             "error": "Chưa cấu hình SLR API key. Vui lòng cấu hình trước."
         }, status_code=400)
 
-    url = f"{base_url}/api/public/papers/projects"
+    url = f"{base_url}/api/public/v1/repository/capabilities"
     try:
-        def fetch():
-            return requests.get(url, headers={"X-API-Key": api_key}, timeout=5)
-        resp = await asyncio.to_thread(fetch)
+        resp = await asyncio.to_thread(
+            requests.get, url, headers={"X-API-Key": api_key}, timeout=5
+        )
         if resp.status_code == 200:
-            data = resp.json()
-            return {"success": True, "projects": data.get("data", [])}
+            payload = resp.json()
+            data = payload.get("data") if isinstance(payload, dict) else None
+            if not isinstance(payload, dict) or payload.get("isSuccess") is False or not isinstance(data, dict) or not isinstance(data.get("scopes"), list):
+                return JSONResponse({
+                    "success": False,
+                    "error": "SLR Repository API returned an invalid capabilities response.",
+                }, status_code=502)
+            scopes = sorted({scope for scope in data["scopes"] if isinstance(scope, str)})
+            raw_allowed_project_ids = data.get("allowedProjectIds")
+            allowed_project_ids = sorted({project_id for project_id in raw_allowed_project_ids if isinstance(project_id, str)}) if isinstance(raw_allowed_project_ids, list) else []
+            return {
+                "success": True,
+                "message": "Connected to the SLR Repository API.",
+                "scopes": scopes,
+                "allowed_project_ids": allowed_project_ids,
+                "project_grants_known": True,
+            }
+        elif resp.status_code == 404:
+            return await _discover_slr_capabilities(base_url, api_key)
         elif resp.status_code == 401:
             return JSONResponse({
                 "success": False,
                 "error": "Mã API Key không hợp lệ (401 Unauthorized). Vui lòng kiểm tra lại."
             }, status_code=401)
+        elif resp.status_code == 403:
+            return JSONResponse({
+                "success": False,
+                "error": "API key is valid but cannot inspect its SLR permissions (403 Forbidden)."
+            }, status_code=403)
         else:
             return JSONResponse({
                 "success": False,
                 "error": f"SLR Backend trả về lỗi {resp.status_code}: {resp.text}"
             }, status_code=resp.status_code)
-    except requests.exceptions.ConnectionError:
+    except requests.exceptions.RequestException:
         return JSONResponse({
             "success": False,
             "error": f"Không thể kết nối tới SLR Backend tại {base_url}. Hãy chắc chắn server backend đang chạy (PORT 5000)."
         }, status_code=503)
     except Exception as e:
         return JSONResponse({"success": False, "error": f"Lỗi kiểm tra dự án: {str(e)}"}, status_code=500)
+
+@app.get("/api/slr/capabilities")
+async def get_slr_capabilities():
+    return await _load_slr_capabilities()
+
+@app.get("/api/slr/test-connection")
+async def test_slr_repository_connection():
+    return await _load_slr_capabilities()
+
+@app.get("/api/slr/projects")
+async def get_slr_projects():
+    settings.refresh_api_credentials()
+    base_url = settings.SLR_API_BASE_URL or "http://127.0.0.1:5000"
+    api_key = settings.SLR_API_KEY
+    if not api_key:
+        return JSONResponse({"success": False, "error": "ChÆ°a cáº¥u hÃ¬nh SLR API key."}, status_code=400)
+    try:
+        response = await asyncio.to_thread(
+            requests.get,
+            f"{base_url}/api/public/papers/projects",
+            headers={"X-API-Key": api_key},
+            timeout=5,
+        )
+        if response.status_code == 200:
+            payload = response.json()
+            projects = payload.get("data", []) if isinstance(payload, dict) else []
+            if not isinstance(projects, list):
+                projects = []
+            return {"success": True, "projects": projects}
+        if response.status_code == 401:
+            return JSONResponse({"success": False, "error": "SLR API key không hợp lệ hoặc đã bị thu hồi."}, status_code=401)
+        if response.status_code == 403:
+            return JSONResponse({"success": False, "error": "API key thiếu quyền xem danh sách project."}, status_code=403)
+        return JSONResponse({
+            "success": False,
+            "error": f"SLR Backend trả về lỗi {response.status_code} khi tải project.",
+        }, status_code=response.status_code)
+    except requests.exceptions.ConnectionError:
+        return JSONResponse({"success": False, "error": f"Không thể kết nối tới SLR Backend tại {base_url}."}, status_code=503)
+    except Exception as exc:
+        return JSONResponse({"success": False, "error": f"Lỗi tải danh sách project: {str(exc)}"}, status_code=500)
+
 
 def _normalize_fetcher_draft(draft):
     """Expose the legacy nested review result in the Repository API draft schema."""
@@ -1726,6 +1910,12 @@ def _openalex_upload_fields(metadata, doi, analysis_draft=None):
                    or (metadata.get("openAlexId") if isinstance(metadata, dict) else None))
     clean_classification = {}
     has_topics = False
+    open_access_fields = {}
+    if isinstance(metadata, dict):
+        if isinstance(metadata.get("isOpenAccess"), bool):
+            open_access_fields["isOpenAccess"] = metadata["isOpenAccess"]
+        if isinstance(metadata.get("openAccessUrl"), str) and metadata["openAccessUrl"].startswith(("https://", "http://")):
+            open_access_fields["openAccessUrl"] = metadata["openAccessUrl"]
     if isinstance(classification, dict):
         # Metadata can come from imported records; only forward bounded ID lists
         # accepted by the SLR-BE contract.
@@ -1749,11 +1939,12 @@ def _openalex_upload_fields(metadata, doi, analysis_draft=None):
             clean_classification.get(key)
             for key in ("subfieldIds", "fieldIds", "domainIds")
         )
-        if has_complete_hierarchy:
+        if has_complete_hierarchy and isinstance(metadata.get("isOpenAccess"), bool):
             return {
                 "classification": clean_classification,
                 "classificationProvenance": provenance if isinstance(provenance, dict) else None,
                 "openAlexId": openalex_id.strip()[:300] if isinstance(openalex_id, str) and openalex_id.strip() else None,
+                **open_access_fields,
             }
     openalex_id_is_valid = isinstance(openalex_id, str) and re.fullmatch(
         r"https?://openalex\.org/W\d+|W\d+", openalex_id, re.IGNORECASE
@@ -1763,11 +1954,16 @@ def _openalex_upload_fields(metadata, doi, analysis_draft=None):
             "classification": clean_classification,
             "classificationProvenance": provenance if isinstance(provenance, dict) else None,
             "openAlexId": openalex_id.strip()[:300] if isinstance(openalex_id, str) and openalex_id.strip() else None,
-        } if has_topics else {})
+        } if has_topics else open_access_fields)
     try:
         from automatic_sources import fetch_openalex_classification
         lookup_doi = "" if str(doi).startswith("slrwork_") else doi
         result = fetch_openalex_classification(lookup_doi, openalex_id)
+        if isinstance(result, dict):
+            if isinstance(result.get("isOpenAccess"), bool):
+                open_access_fields["isOpenAccess"] = result["isOpenAccess"]
+            if isinstance(result.get("openAccessUrl"), str):
+                open_access_fields["openAccessUrl"] = result["openAccessUrl"]
         if isinstance(result, dict) and result.get("status") == "MATCHED":
             refreshed = result.get("classification")
             if isinstance(refreshed, dict) and refreshed.get("topicIds"):
@@ -1778,18 +1974,19 @@ def _openalex_upload_fields(metadata, doi, analysis_draft=None):
                 result["classification"] = merged_classification
                 if not result.get("classificationProvenance") and isinstance(provenance, dict):
                     result["classificationProvenance"] = provenance
-                return result
+                return {**result, **open_access_fields}
         if has_topics:
             # A temporary OpenAlex failure must not erase previously saved topic IDs.
             return {
                 "classification": clean_classification,
                 "classificationProvenance": provenance if isinstance(provenance, dict) else None,
                 "openAlexId": openalex_id.strip()[:300] if isinstance(openalex_id, str) and openalex_id.strip() else None,
+                **open_access_fields,
             }
-        return result or {}
+        return {**(result or {}), **open_access_fields}
     except Exception as exc:
         print(f"[OPENALEX] Topic classification unavailable for {doi}: {exc}")
-        return {}
+        return open_access_fields
 
 
 def _openalex_classification_artifact(fields):
@@ -1808,7 +2005,7 @@ def _openalex_classification_artifact(fields):
     }
 
 
-def _push_analysis_run_to_slr(store, doi, record, target_path, base_url, api_key, project_id):
+def _push_analysis_run_to_slr(store, doi, record, target_path, base_url, api_key, project_id, paper_id=None):
     """Upload a completed Fetcher run and its exact full-text mapping snapshot."""
     from pathlib import Path
 
@@ -1826,6 +2023,10 @@ def _push_analysis_run_to_slr(store, doi, record, target_path, base_url, api_key
         mapping_path = Path(target_path).with_suffix(".fulltext.json")
         if not mapping_path.is_file():
             raise FileNotFoundError(f"Missing full-text mapping: {mapping_path.name}")
+        source_pdf_path = Path(target_path)
+        source_pdf_bytes = (source_pdf_path.read_bytes()
+                            if source_pdf_path.is_file() and source_pdf_path.suffix.lower() == ".pdf"
+                            and valid_pdf_file(source_pdf_path) else None)
         analysis_payload = {"analysis": {**analysis_record, "draft": draft, "argumentation": argumentation}}
         mapping_bytes = mapping_path.read_bytes()
         source_run_id = str(argumentation.get("id") or doi)
@@ -1855,6 +2056,8 @@ def _push_analysis_run_to_slr(store, doi, record, target_path, base_url, api_key
             "publisher": metadata.get("publisher"), "language": metadata.get("language"),
             "publicationType": metadata.get("publicationType"), "keywords": metadata.get("keywords"),
             "openAlexId": metadata.get("openAlexId") or openalex_fields.get("openAlexId"),
+            "isOpenAccess": metadata.get("isOpenAccess", openalex_fields.get("isOpenAccess")),
+            "openAccessUrl": metadata.get("openAccessUrl") or openalex_fields.get("openAccessUrl"),
             "externalIdentifiers": metadata.get("externalIdentifiers"),
             **{key: value for key, value in openalex_fields.items() if key in {"classification", "classificationProvenance"}},
             "doi": doi, "sourceUrl": record.get("resolved_url") or metadata.get("sourceUrl") or metadata.get("url"),
@@ -1866,15 +2069,22 @@ def _push_analysis_run_to_slr(store, doi, record, target_path, base_url, api_key
         if openalex_artifact:
             analysis_payload["analysis"]["draft"]["openalex_classification"] = openalex_artifact
         analysis_bytes = json.dumps(analysis_payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-        digest = hashlib.sha256(analysis_bytes + b"\0" + mapping_bytes).hexdigest()
+        digest_input = analysis_bytes + b"\0" + mapping_bytes + b"\0" + (source_pdf_bytes or b"")
+        digest = hashlib.sha256(digest_input).hexdigest()
+        form_data = {"doi": doi, "metadata": json.dumps(metadata_payload, ensure_ascii=False)}
+        if isinstance(paper_id, str) and paper_id.strip():
+            form_data["paperId"] = paper_id.strip()
+        upload_files = {
+            "analysis": ("analysis.json", analysis_bytes, "application/json"),
+            "fullTextMapping": (mapping_path.name, mapping_bytes, "application/json"),
+        }
+        if source_pdf_bytes:
+            upload_files["pdf"] = (source_pdf_path.name, source_pdf_bytes, "application/pdf")
         response = requests.post(
             f"{base_url}/api/public/projects/{project_id}/analysis-runs",
             headers={"X-API-Key": api_key, "Idempotency-Key": f"paper-fetcher-{source_run_id[:80]}-{digest}"},
-            data={"doi": doi, "metadata": json.dumps(metadata_payload, ensure_ascii=False)},
-            files={
-                "analysis": ("analysis.json", analysis_bytes, "application/json"),
-                "fullTextMapping": (mapping_path.name, mapping_bytes, "application/json"),
-            },
+            data=form_data,
+            files=upload_files,
             timeout=180,
         )
         if response.status_code not in (200, 201):
@@ -1944,6 +2154,8 @@ def _push_paper_to_repository(store, doi, record, target_path, base_url, api_key
             "publisher": meta.get("publisher"), "language": meta.get("language"),
             "publicationType": meta.get("publicationType"), "keywords": meta.get("keywords"),
             "openAlexId": meta.get("openAlexId") or openalex_fields.get("openAlexId"),
+            "isOpenAccess": meta.get("isOpenAccess", openalex_fields.get("isOpenAccess")),
+            "openAccessUrl": meta.get("openAccessUrl") or openalex_fields.get("openAccessUrl"),
             "externalIdentifiers": meta.get("externalIdentifiers"),
             **{key: value for key, value in openalex_fields.items() if key in {"classification", "classificationProvenance"}},
             "doi": work_doi or None, "sourceUrl": record.get("resolved_url") or meta.get("sourceUrl") or meta.get("url"),
@@ -2395,7 +2607,8 @@ async def push_papers_to_slr(request: Request):
                     imported_ids = res_json.get("data", {}).get("importedPaperIds", [])
                     msg = f"Đã upload & import thành công (Mã Paper: {', '.join(imported_ids) if imported_ids else 'OK'})"
                     analysis_sync = await asyncio.to_thread(
-                        _push_analysis_run_to_slr, store, doi, record, target_path, base_url, api_key, project_id
+                        _push_analysis_run_to_slr, store, doi, record, target_path, base_url, api_key, project_id,
+                        imported_ids[0] if len(imported_ids) == 1 else None,
                     )
                     if not analysis_sync.get("success"):
                         fail_count += 1

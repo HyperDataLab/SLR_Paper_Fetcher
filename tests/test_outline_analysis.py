@@ -2,7 +2,7 @@ import unittest
 import json
 import tempfile
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from ai_analysis import (
     FULLTEXT_MAPPING_SCHEMA_VERSION,
@@ -11,11 +11,14 @@ from ai_analysis import (
     _fallback_outline_groups,
     _group_outline_sections,
     _load_and_validate_fulltext_mapping,
+    _has_reported_profile_keywords,
     _outline_evidence_records,
+    _preferred_profile_keywords,
     _quote_span,
     _write_fulltext_mapping,
     build_outline_layers,
 )
+from automatic_sources import fetch_openalex_classification
 from paper_store import PaperStore, remap_outline_source_ids, repair_legacy_outline_group_references
 
 
@@ -64,8 +67,44 @@ class OutlineParserTests(unittest.TestCase):
         self.assertEqual([item["text"] for item in paragraphs], [first.strip(), second.strip()])
         self.assertTrue(all(loaded["text"][item["start_offset"]:item["end_offset"]] == item["text"] for item in paragraphs))
 
+    def test_openalex_keyword_list_is_preserved_even_when_work_has_no_topics(self):
+        response = MagicMock()
+        response.__enter__.return_value.status_code = 200
+        response.__enter__.return_value.json.return_value = {
+            "id": "https://openalex.org/W123",
+            "doi": "https://doi.org/10.1234/example",
+            "keywords": [
+                {"id": "https://openalex.org/keywords/federated-learning", "display_name": "Federated learning", "score": 0.91},
+                {"id": "https://openalex.org/keywords/edge-computing", "display_name": "Edge computing", "score": 0.83},
+            ],
+            "topics": [],
+        }
+        with patch("automatic_sources.polite_get", return_value=response):
+            result = fetch_openalex_classification("10.1234/example")
+        self.assertEqual(result["status"], "NOT_FOUND")
+        self.assertEqual([item["display_name"] for item in result["keywords"]], ["Federated learning", "Edge computing"])
+        self.assertEqual(result["keywords"][0]["score"], 0.91)
+
 
 class OutlineLayersTests(unittest.TestCase):
+    def test_openalex_keywords_take_precedence_over_article_and_ai_keywords(self):
+        openalex = [{"term": "federated learning", "source_type": "openalex_reported"}]
+        author = [{"term": "distributed learning", "source_type": "author_reported"}]
+        ai = [{"term": "edge systems", "source_type": "text_extracted"}]
+        self.assertEqual(_preferred_profile_keywords(openalex, author, [], ai), openalex)
+        self.assertTrue(_has_reported_profile_keywords([{"display_name": "federated learning"}], author, []))
+
+    def test_reported_article_keywords_precede_ai_keyword_fallback(self):
+        author = [{"term": "distributed learning", "source_type": "author_reported"}]
+        grobid = [{"term": "wireless networks", "source_type": "grobid_reported"}]
+        ai = [{"term": "edge systems", "source_type": "text_extracted"}]
+        self.assertEqual(_preferred_profile_keywords([], author, grobid, ai), author + grobid)
+
+    def test_ai_keywords_are_used_only_when_no_reported_source_has_any(self):
+        ai = [{"term": "edge systems", "source_type": "text_extracted"}]
+        self.assertEqual(_preferred_profile_keywords([], [], [], ai), ai)
+        self.assertFalse(_has_reported_profile_keywords([], [], []))
+
     def test_grouping_counts_only_content_sections_and_preserves_heading_only_nodes(self):
         outline = [
             {"section_id": "sec_1", "structure_id": "str_1", "order": 1, "heading": "Intro", "analysis_status": "analyzed"},

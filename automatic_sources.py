@@ -48,7 +48,7 @@ def check_openalex(doi):
 
 
 def fetch_openalex_classification(doi, openalex_id=None):
-    """Return OpenAlex's per-work topic hierarchy for SLR's existing filters."""
+    """Return OpenAlex topics and keywords for a work when the record is available."""
     settings.refresh_api_credentials()
     doi = re.sub(r"^https?://(?:dx\.)?doi\.org/", "", str(doi or "").strip(), flags=re.IGNORECASE)
     openalex_id = str(openalex_id or "").strip()
@@ -70,6 +70,31 @@ def fetch_openalex_classification(doi, openalex_id=None):
     resolved_doi = re.sub(r"^https?://(?:dx\.)?doi\.org/", "", str(work.get("doi") or "").strip(), flags=re.IGNORECASE)
     if doi and resolved_doi.casefold() != doi.casefold():
         return {"status": "NOT_FOUND"}
+    openalex_keywords = []
+    seen_keywords = set()
+    raw_keywords = work.get("keywords") if isinstance(work.get("keywords"), list) else []
+    for item in raw_keywords:
+        if not isinstance(item, dict):
+            continue
+        display_name = str(item.get("display_name") or "").strip()
+        normalized = " ".join(display_name.casefold().split())
+        if not display_name or normalized in seen_keywords:
+            continue
+        seen_keywords.add(normalized)
+        score = item.get("score")
+        openalex_keywords.append({
+            "id": item.get("id") if isinstance(item.get("id"), str) else None,
+            "display_name": display_name,
+            "score": score if isinstance(score, (int, float)) and not isinstance(score, bool) else None,
+        })
+    open_access = work.get("open_access") if isinstance(work.get("open_access"), dict) else {}
+    open_access_fields = {}
+    if isinstance(open_access.get("is_oa"), bool):
+        open_access_fields["isOpenAccess"] = open_access["is_oa"]
+    best_oa_location = work.get("best_oa_location") if isinstance(work.get("best_oa_location"), dict) else {}
+    open_access_url = (open_access.get("oa_url") or best_oa_location.get("pdf_url") or best_oa_location.get("landing_page_url"))
+    if isinstance(open_access_url, str) and open_access_url.startswith(("https://", "http://")):
+        open_access_fields["openAccessUrl"] = open_access_url
     primary = work.get("primary_topic") if isinstance(work.get("primary_topic"), dict) else {}
     topics = work.get("topics") if isinstance(work.get("topics"), list) else []
     topics = [topic for topic in topics if isinstance(topic, dict) and isinstance(topic.get("id"), str)]
@@ -77,7 +102,8 @@ def fetch_openalex_classification(doi, openalex_id=None):
         topics = [primary] + topics
     topics = topics[:20]
     if not topics:
-        return {"status": "NOT_FOUND"}
+        return {"status": "NOT_FOUND", "openAlexId": work.get("id"),
+                "keywords": openalex_keywords, **open_access_fields}
     primary_topic_id = primary.get("id") if isinstance(primary.get("id"), str) else None
 
     def unique_ids(key):
@@ -96,6 +122,8 @@ def fetch_openalex_classification(doi, openalex_id=None):
     classification = {key: value for key, value in classification.items() if value}
     return {
         "status": "MATCHED",
+        **open_access_fields,
+        "keywords": openalex_keywords,
         "classification": classification,
         "openAlexId": work.get("id"),
         "classificationProvenance": {

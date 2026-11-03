@@ -298,6 +298,23 @@ body[data-page] #projectDropdownMenu #projectSearchInput,
 body[data-page] #manualProjectId { background: #fff !important; color: var(--slr-ink) !important; border-color: #bdcbd4 !important; }
 body[data-page] #projectDropdownMenu button[onclick="selectRepositoryDestination()"] { color: var(--slr-primary) !important; background: var(--slr-primary-soft) !important; border-color: #c5deed !important; }
 body[data-page] #projectDropdownMenu button[onclick="selectProjectItem('__manual__')"] { color: var(--slr-muted) !important; border-color: var(--slr-border) !important; }
+body[data-page] #projectDropdownList > .group {
+  color: var(--slr-ink) !important; border-color: transparent !important; border-radius: 8px !important;
+}
+body[data-page] #projectDropdownList > .group:hover {
+  background: #f1f6f9 !important; border-color: #dce7ed !important;
+}
+body[data-page] #projectDropdownList > .group > div:first-child {
+  color: var(--slr-primary) !important; background: var(--slr-primary-soft) !important;
+}
+body[data-page] #projectDropdownList > .group > div:nth-child(2) > div:first-child {
+  color: var(--slr-ink) !important; font-size: 13px !important; font-weight: 600 !important; line-height: 1.4 !important;
+}
+body[data-page] #projectDropdownList > .group span.border {
+  color: #46527a !important; background: #eef0ff !important; border-color: #d6dafb !important;
+}
+body[data-page] #projectDropdownList > .group span.font-mono { color: #627381 !important; font-size: 11px !important; }
+body[data-page] #projectDropdownList > .group span.font-mono span { color: #344b5b !important; }
 body[data-page="library"] .library-metrics,
 body[data-page="search"] .library-metrics {
   grid-template-columns: repeat(4,minmax(0,1fr)) !important; gap: 0 !important; overflow: hidden;
