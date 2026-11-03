@@ -12,6 +12,13 @@
 - An entry becomes APPROVED only after its required authorized human approver(s) provide an explicit option, identity, timestamp, and any conditions/rationale.
 - No approver identity or approval date is prefilled. “Required approver” below is proposed routing; where prior documents do not establish formal authority, the uncertainty is stated.
 
+## Developer preference for owner review — not an approval
+
+- The developer's chat response is treated as a preference to carry the QA-02 recommended option for each decision into Product Owner review. It is not a product decision or approval.
+- The developer clarified that they are not the Product Owner. No Product Owner authority, approver identity, approval timestamp, or authorization is recorded from the chat.
+- The developer explicitly directed that AS-OD-09, AS-OD-15, and AS-OD-16 remain OPEN pending Research Lead review; Product Owner approval is also still required for those decisions.
+- **Register effect:** All 17 approval statuses remain OPEN. The preference does not change any decision status or establish a requirements baseline.
+
 ## AS-OD-01 — Required number of human reviewers
 
 - **Question:** Is one authorized reviewer sufficient to publish a Verified Atomic Sentence, or do selected claims/roles require two independent reviews and adjudication?

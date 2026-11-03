@@ -1,16 +1,16 @@
 # QA-05 Cross-Decision Consistency Review
 
-**Status:** No approved decisions to reconcile. This document records conditional consistency checks for when human outcomes are supplied. It does not resolve or select options.
+**Status:** No approved decisions to reconcile. The developer preference for the QA-02 recommendations is a proposal for Product Owner review, not an authorized selection. This document records conditional consistency checks and does not approve or defer options.
 
 ## Review conclusion
 
-All AS-OD-01–17 are OPEN with no human outcome. Therefore there is no approved decision set whose internal consistency can be certified. QA-04's recommendations and questionnaire cross-checks remain proposals. The relationships below identify combinations that must be checked after choices are recorded.
+All AS-OD-01–17 are OPEN with no authorized Product Owner or Research Lead outcome. The developer prefers the QA-02 recommended options as proposals; this does not create an approved decision set. AS-OD-09, AS-OD-15, and AS-OD-16 remain OPEN pending Research Lead review and Product Owner approval. The relationships below identify combinations that must be checked after authorized outcomes are recorded.
 
 ## Conditional consistency checks
 
 | Decisions | Consistency condition to verify | Why it matters | Canonical tickets affected | Current state |
 |---|---|---|---|---|
-| AS-OD-01 and AS-OD-15 | Operational verification quorum must remain separate from research gold-set annotation. A one-review product policy cannot reduce two independent gold annotators plus adjudication if that protocol is approved. | Product trust gate and evaluation reference set answer different questions. | AS-GOV-002, AS-QA-001, AS-API-004, AS-UI-003, AS-LIB-001 | Both OPEN; no choices to compare. |
+| AS-OD-01 and AS-OD-15 | Operational verification quorum must remain separate from research gold-set annotation. A one-review product policy cannot reduce two independent gold annotators plus adjudication if that protocol is approved. | Product trust gate and evaluation reference set answer different questions. | AS-GOV-002, AS-QA-001, AS-API-004, AS-UI-003, AS-LIB-001 | Both OPEN; no authorized outcomes to compare. |
 | AS-OD-02 and AS-OD-14 | Rejection/regeneration, stale-source invalidation, and re-anchoring must preserve item identity/history. A source refresh cannot silently mutate a rejected or verified item. | Prevents invalid precheck reuse or lost review provenance. | AS-DATA-003, AS-API-004, AS-AI-003/004, AS-LIB-001 | Both OPEN; no lifecycle outcome recorded. |
 | AS-OD-03 and AS-OD-13 | Role and evidence origin must remain distinct. REPORTED_PRIOR_WORK must never become a focal-paper PRIMARY_FINDING because of its functional role or search placement. | Avoids source misattribution in labels, filters, and exports. | AS-AI-001/002, AS-LIB-001/002 | Both OPEN; no mapping/search policy approved. |
 | AS-OD-04 and AS-OD-05 | If sentence-level classification is selected under OD-04, OD-05 must define its semantics. If OD-04 selects semantic preservation only, OD-05 should be explicitly deferred. Every option must preserve uncertainty/modality in atoms. | Avoids duplicate or contradictory uncertainty representations. | AS-GOV-002, AS-AI-002/004, AS-QA-001/002 | Both OPEN; no classifier decision recorded. |
