@@ -5,9 +5,11 @@
 **Approved decisions:** 0 of 17.  
 **Decision register status:** All AS-OD-01–17 remain OPEN.
 
+The developer's chat preference is to carry the QA-02 recommended options forward as proposals for Product Owner review. It is not an authorized decision. The developer explicitly requested that AS-OD-09, AS-OD-15, and AS-OD-16 remain OPEN pending Research Lead review.
+
 ## Why no baseline can be established
 
-QA-05 requires explicit, valid human approvals for mandatory decisions and a consistent approved decision set. The QA-04 register contains no selected option, approver identity, approval authority evidence, timestamp, or recorded conditions for any decision. The questionnaire contains blank selections. QA-02 recommendations and the QA-04 routing proposal are not human approvals.
+QA-05 requires explicit, valid human approvals for mandatory decisions and a consistent approved decision set. The QA-04 register contains no authorized decision outcome, approver identity, approval authority evidence, approval timestamp, or recorded conditions. The questionnaire contains blank selections. QA-02 recommendations and the developer's stated preference are proposals, not human approvals by the Product Owner or Research Lead.
 
 Accordingly, this document does not declare any QA-02 recommendation or PRD implementation interpretation to be an approved product baseline. It also does not mark any requirement as formally deferred.
 
@@ -18,6 +20,7 @@ Accordingly, this document does not declare any QA-02 recommendation or PRD impl
 | Approved product requirements from AS-OD decisions | None |
 | Approved research/evaluation requirements from AS-OD decisions | None |
 | Requirements formally deferred by an authorized approver | None |
+| Developer preferences recorded for Product Owner review | QA-02 recommended options for AS-OD-01–17; not approved |
 | Unresolved decisions | AS-OD-01–AS-OD-17 |
 | Approved baseline version/date | None |
 | Approval provenance | None |
@@ -57,3 +60,5 @@ A future baseline may be established only after:
 5. A baseline version, date, approver identities, conditions, and ticket mapping are recorded.
 
 Until then, AS-GOV-002 cannot complete; no ticket may rely on a baseline that does not exist.
+
+Read-only inspection and nonbinding design alternatives may proceed for review. They do not establish the baseline or change canonical backlog statuses.
