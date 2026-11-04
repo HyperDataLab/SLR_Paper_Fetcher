@@ -1,0 +1,36 @@
+{
+  "paper_id": "demo-paper",
+  "source_sha256": "746535ab248b9c6eb3c18bf17de15d213d7f84c6dec9f7334094ac023536e2b4",
+  "candidates": [
+    {
+      "as_id": "AS-0001",
+      "section": "Results",
+      "atomic_sentence": "The intervention may reduce admissions.",
+      "stance": [{"category": "Hedges", "marker": "may"}],
+      "engagement": [],
+      "support_precheck": {"status": "SUPPORTED"}
+    },
+    {
+      "as_id": "AS-0002",
+      "section": "Introduction",
+      "atomic_sentence": "We used a randomized design.",
+      "stance": [{"category": "Self Mention", "marker": "We"}],
+      "engagement": [],
+      "support_precheck": {"status": "PARTIAL"}
+    },
+    {
+      "as_id": "AS-0003",
+      "section": "Methods",
+      "atomic_sentence": "The method may always improve results.",
+      "stance": [{"category": "Hedges", "marker": "may"}],
+      "engagement": [],
+      "support_precheck": {"status": "SUPPORTED"}
+    }
+  ],
+  "hyland_annotations": [
+    {"annotation_id":"HY-000001","section":"Results","category":"Hedges","marker":"may","function":"Qualifies the reported outcome.","start_offset":71,"end_offset":74,"sentence_start_offset":54,"sentence_end_offset":93,"source_sentence":"The intervention may reduce admissions."},
+    {"annotation_id":"HY-000002","section":"Results","category":"Hedges","marker":"may","function":"Duplicate model label for the same occurrence.","start_offset":71,"end_offset":74,"sentence_start_offset":54,"sentence_end_offset":93,"source_sentence":"The intervention may reduce admissions."},
+    {"annotation_id":"HY-000003","section":"Introduction","category":"Self Mention","marker":"We","function":"Explicit author reference.","start_offset":0,"end_offset":2,"sentence_start_offset":0,"sentence_end_offset":53,"source_sentence":"We used a randomized design under the study protocol."},
+    {"annotation_id":"HY-000004","section":"Methods","category":"Hedges","marker":"may","function":"Qualifies the method claim.","start_offset":105,"end_offset":108,"sentence_start_offset":94,"sentence_end_offset":132,"source_sentence":"The method may always improve results."}
+  ]
+}

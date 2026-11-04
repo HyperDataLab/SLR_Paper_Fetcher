@@ -1,0 +1,17 @@
+{
+  "candidate_extraction": {
+    "exact_match": {"precision": 0.3333, "recall": 0.5, "f1": 0.4, "tp": 1, "fp": 2, "fn": 1},
+    "detection_including_partial": {"precision": 0.6667, "recall": 1.0, "f1": 0.8, "tp": 2, "fp": 1, "fn": 0},
+    "reviewed_match_counts": {"MATCH": 1, "PARTIAL_MATCH": 1, "NO_MATCH": 1}
+  },
+  "atomicity_pass_rate": 0.6667,
+  "meaning_preservation_rate": 0.6667,
+  "source_support": {
+    "classification_accuracy": 0.6667,
+    "supported_precision": {"precision": 0.5, "tp": 1, "fp": 1}
+  },
+  "hyland": {
+    "Hedges": {"precision": 0.3333, "recall": 1.0, "f1": 0.5, "tp": 1, "fp": 2, "fn": 0},
+    "Self Mention": {"precision": 1.0, "recall": 1.0, "f1": 1.0, "tp": 1, "fp": 0, "fn": 0}
+  }
+}
