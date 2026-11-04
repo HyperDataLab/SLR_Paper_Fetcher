@@ -1,0 +1,3 @@
+{"paper_id":"demo-paper","as_id":"AS-0001","match_status":"MATCH","matched_gold_id":"G1","atomicity_pass":true,"meaning_preserved":true,"human_support_status":"SUPPORTED"}
+{"paper_id":"demo-paper","as_id":"AS-0002","match_status":"PARTIAL_MATCH","matched_gold_id":"G2","atomicity_pass":true,"meaning_preserved":false,"human_support_status":"PARTIAL"}
+{"paper_id":"demo-paper","as_id":"AS-0003","match_status":"NO_MATCH","matched_gold_id":null,"atomicity_pass":false,"meaning_preserved":true,"human_support_status":"CONTRADICTED"}

@@ -359,6 +359,67 @@ async def analysis_source(paper_id: str):
     return FileResponse(path=path, media_type=media_type, headers={"Content-Disposition": "inline"})
 
 
+@app.post("/api/atomic/analyze/{paper_id:path}")
+async def analyze_atomic_paper(paper_id: str, request: Request):
+    """Run transient Atomic Sentence + Hyland analysis over the current source text."""
+    normalized = _analysis_paper_id(paper_id)
+    if not normalized:
+        return JSONResponse({"error": "Invalid paper identifier."}, status_code=400)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    if not isinstance(body, dict):
+        return JSONResponse({"error": "Request body must be a JSON object."}, status_code=400)
+    provider = str(body.get("provider") or settings.AI_DEFAULT_PROVIDER or "ollama").strip().lower()
+    if provider not in {"ollama", "gemini"}:
+        return JSONResponse({"error": "Choose Ollama or Gemini as the AI provider."}, status_code=400)
+    if provider == "gemini" and not settings.GEMINI_API_KEY:
+        return JSONResponse({"error": "GEMINI_API_KEY is not configured in .env."}, status_code=400)
+    record = await asyncio.to_thread(get_store().downloaded, normalized)
+    if not record or not _valid_analysis_source(record.get("file_path")):
+        return JSONResponse({"error": "A valid saved PDF or Markdown source is not available for this paper."}, status_code=404)
+    source_path = Path(record["file_path"])
+
+    def run_atomic_analysis():
+        import hashlib
+        from atomic_sentence import analyze_atomic_sentences
+        if source_path.suffix.lower() in {".md", ".markdown"}:
+            source_bytes = source_path.read_bytes()
+            raw = source_bytes.decode("utf-8")
+            source_hash = hashlib.sha256(source_bytes).hexdigest()
+            document = {"text": raw, "metadata": {"source_kind": "markdown",
+                "source_markdown": {"file_name": source_path.name, "sha256": source_hash}}, "sections": []}
+            result = analyze_atomic_sentences(document, normalized, provider)
+            if hashlib.sha256(source_path.read_bytes()).hexdigest() != source_hash:
+                raise ValueError("The Markdown source changed during Atomic analysis. Run the analysis again.")
+        else:
+            from ai_analysis import _grobid_extract_pdf, _pdf_artifact_identity
+            starting_identity = _pdf_artifact_identity(source_path)
+            document, _ = _grobid_extract_pdf(source_path)
+            mapped_identity = (document.get("metadata") or {}).get("pdf_artifact", {}).get("sha256")
+            if mapped_identity != starting_identity.get("sha256"):
+                raise ValueError("The extracted full-text mapping does not match the current PDF.")
+            result = analyze_atomic_sentences(document, normalized, provider)
+            if _pdf_artifact_identity(source_path).get("sha256") != starting_identity.get("sha256"):
+                raise ValueError("The PDF changed during Atomic analysis. Run the analysis again.")
+        try:
+            metadata = json.loads(record.get("metadata") or "{}")
+        except (TypeError, ValueError):
+            metadata = {}
+        result["paper"] = {"title": metadata.get("title") or record.get("filename") or normalized,
+            "filename": record.get("filename") or ""}
+        return result
+
+    try:
+        result = await asyncio.to_thread(run_atomic_analysis)
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)[:500]}, status_code=502)
+    return JSONResponse(result, headers={"Cache-Control": "no-store"})
+
+
 @app.get("/api/analysis/papers")
 async def analysis_papers():
     store = get_store()
