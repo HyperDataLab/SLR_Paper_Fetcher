@@ -1,0 +1,28 @@
+diff --git a/src/modules/repository-api/repository-api.schemas.ts b/src/modules/repository-api/repository-api.schemas.ts
+index 1e31348..0000000 100644
+--- a/src/modules/repository-api/repository-api.schemas.ts
++++ b/src/modules/repository-api/repository-api.schemas.ts
+@@ -23,6 +23,8 @@ export const workSearchQuerySchema = z.object({
+   hasPdf: booleanQuery,
+   hasFullText: booleanQuery,
+   hasAnalysis: booleanQuery,
++  hasClassification: booleanQuery,
++  needsFetcherProcessing: booleanQuery,
+   limit: z.coerce.number().int().min(1).max(100).default(25),
+   cursor: z.string().max(512).optional(),
+ }).strict().superRefine((query, context) => {
+diff --git a/src/modules/repository-api/repository-api.service.ts b/src/modules/repository-api/repository-api.service.ts
+index 3f0e223..0000000 100644
+--- a/src/modules/repository-api/repository-api.service.ts
++++ b/src/modules/repository-api/repository-api.service.ts
+@@ -389,6 +389,12 @@ export class RepositoryApiService {
+     if (query.yearTo !== undefined && (metadata.publicationYear === undefined || metadata.publicationYear > query.yearTo)) return false;
+     if (query.hasPdf !== undefined && Boolean(work.contentAvailability?.hasPdf) !== query.hasPdf) return false;
+     if (query.hasFullText !== undefined && Boolean(work.contentAvailability?.hasFullText) !== query.hasFullText) return false;
+     if (query.hasAnalysis !== undefined && hasAnalysis !== query.hasAnalysis) return false;
++    const classification = work.classification || {};
++    const hasClassification = Boolean(classification.primaryTopicId || classification.topicIds?.length);
++    if (query.hasClassification !== undefined && hasClassification !== query.hasClassification) return false;
++    if (query.needsFetcherProcessing !== undefined && (!hasAnalysis || !hasClassification) !== query.needsFetcherProcessing) return false;
+     return true;
+   }

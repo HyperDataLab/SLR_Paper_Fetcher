@@ -112,6 +112,11 @@ class PaperStore:
                     provider TEXT, model TEXT, draft TEXT, error TEXT,
                     created_at TEXT NOT NULL, updated_at TEXT NOT NULL
                 );
+                CREATE TABLE IF NOT EXISTS atomic_stance_analyses (
+                    doi TEXT PRIMARY KEY REFERENCES papers(doi) ON DELETE CASCADE,
+                    source_pdf_sha256 TEXT NOT NULL, artifact TEXT NOT NULL,
+                    created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+                );
                 CREATE TABLE IF NOT EXISTS analysis_runs (
                     id TEXT PRIMARY KEY, doi TEXT NOT NULL REFERENCES papers(doi),
                     status TEXT NOT NULL, provider TEXT, model TEXT,
@@ -315,6 +320,36 @@ class PaperStore:
                 (json.dumps(draft, ensure_ascii=False), now, doi),
             )
             return cursor.rowcount == 1
+
+    def get_atomic_stance_analysis(self, doi):
+        with self.connect() as db:
+            row = db.execute("SELECT * FROM atomic_stance_analyses WHERE doi=?", (doi,)).fetchone()
+        if not row:
+            return None
+        result = dict(row)
+        try:
+            result["artifact"] = json.loads(result.get("artifact") or "{}")
+        except (TypeError, ValueError):
+            return None
+        return result
+
+    def save_atomic_stance_analysis(self, doi, artifact):
+        """Persist Atomic-only output without creating or changing a full analysis run."""
+        now = datetime.now(timezone.utc).isoformat()
+        source_hash = (artifact.get("provenance") or {}).get("source_pdf_sha256")
+        if not source_hash:
+            return False
+        with self.connect() as db:
+            paper = db.execute("SELECT status FROM papers WHERE doi=?", (doi,)).fetchone()
+            if not paper or paper["status"] != "DOWNLOADED":
+                return False
+            db.execute(
+                """INSERT INTO atomic_stance_analyses(doi,source_pdf_sha256,artifact,created_at,updated_at)
+                VALUES(?,?,?,?,?) ON CONFLICT(doi) DO UPDATE SET
+                source_pdf_sha256=excluded.source_pdf_sha256,artifact=excluded.artifact,updated_at=excluded.updated_at""",
+                (doi, source_hash, json.dumps(artifact, ensure_ascii=False), now, now),
+            )
+            return True
 
     def update_openalex_classification(self, doi, classification):
         """Persist OpenAlex classification without replacing paper or AI analysis data."""

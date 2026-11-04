@@ -1,6 +1,6 @@
 # AS-TECH-01 — API and AI Architecture Proposal
 
-**Status:** Service and contract proposal for review. Routes, state transitions, schemas, and release behavior are not approved.
+**Status:** The broader service and contract remain proposals for review. A first, narrowly scoped Stance & Engagement table is implemented as described below; it does not implement the Atomic Sentence lifecycle.
 **Integration target:** Existing FastAPI application and existing paper/source artifacts.
 **Constraint:** Do not change existing `/api/analysis` behavior or Toulmin/AIF semantics.
 
@@ -126,4 +126,8 @@ Decision-level impact map (all rows remain OPEN):
 | AS-OD-16 | Evaluation metrics, denominators, thresholds and release gates | Product Owner and Research Lead review/approval requested |
 | AS-OD-17 | Pilot-target vs release-gate treatment and runtime benchmark conditions | Product Owner; Technical Lead benchmark review; Research Lead metric review |
 
-No endpoint, prompt, schema, queue, migration, or application behavior is implemented by this proposal.
+## Implemented first increment: Stance & Engagement table
+
+The Analysis detail page now provides `POST /api/analysis/atomic/stance-engagement/{doi}` and a matching GET route for its saved result. It requires only a saved PDF; GROBID creates or reuses the checksum-valid full-text mapping without running the other AI analysis stages. The AI follows a Review–Revise–Reframe flow: one pass proposes context-sensitive Hyland (2005) cues with exact quotes and offsets; a second pass reviews those candidates; the server rejects spans that do not exactly match the mapped source and deterministically calculates category counts, rates per 1,000 words, and within-group percentages.
+
+The table contains the four Stance categories and five Engagement categories shown in Hyland's model. Each accepted occurrence retains its exact quote, character offsets, section and available page; results record the PDF/text checksums, model, prompt version, word-count rule, and accepted/rejected counts. Results are saved in a separate `atomic_stance_analyses` table and are hidden when the current PDF checksum no longer matches. The UI temporarily hides the other analysis modules and full-analysis queue while Atomic Sentence work is in focus; their code and API routes remain intact. Human review remains required; this feature does not create verified Atomic Sentences, reviewer decisions, a trusted library, or exports. The broader routes, schemas, state transitions, and release behavior in this proposal remain unimplemented and unapproved.

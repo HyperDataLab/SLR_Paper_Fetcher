@@ -60,6 +60,11 @@
     .atomic-workspace>*{min-width:0}
     .atomic-section-list{overflow-wrap:anywhere;word-break:break-word}
     @media(max-width:760px){.atomic-workspace{grid-template-columns:minmax(0,1fr)}}
+    .atomic-focus-mode #queueAllBtn,.atomic-focus-mode .analysis-cross-paper,.atomic-focus-mode [data-full-analysis-control]{display:none!important}
+    .atomic-focus-mode #draftTabAnalysis,.atomic-focus-mode #draftTabImrad,.atomic-focus-mode #draftTabBlueprint,.atomic-focus-mode #draftTabToulmin,.atomic-focus-mode #draftTabCraft,.atomic-focus-mode #draftTabAif,.atomic-focus-mode #draftTabScientificTypes,.atomic-focus-mode #draftTabSaffron,.atomic-focus-mode #draftTabPropositions,.atomic-focus-mode #draftTabMvp3{display:none!important}
+    .atomic-focus-mode #draftAnalysisView,.atomic-focus-mode #draftImradView,.atomic-focus-mode #draftBlueprintView,.atomic-focus-mode #draftCraftView,.atomic-focus-mode #draftScientificTypesView,.atomic-focus-mode #draftSaffronView,.atomic-focus-mode #draftPropositionView,.atomic-focus-mode #draftArgumentGraphView,.atomic-focus-mode #draftMvp3View{display:none!important}
+    .atomic-focus-mode #draftAtomicSentencesView>header,.atomic-focus-mode #draftAtomicSentencesView>section[aria-labelledby="atomicPaperContextHeading"],.atomic-focus-mode .atomic-workspace>nav,.atomic-focus-mode #atomicCandidateHeading,.atomic-focus-mode #atomicCandidateHeading+p,.atomic-focus-mode #atomicStanceProvenance{display:none!important}
+    .atomic-focus-mode .atomic-workspace{display:block}.atomic-focus-mode #atomicExtractionStatus.hidden{display:none!important}
     .analysis-running{position:relative;overflow:hidden;border-color:#bfdbfe}
     .analysis-running::before{content:"";position:absolute;inset:0 auto auto 0;width:30%;height:2px;background:#2563eb;transform:translateX(-110%);animation:analysis-sweep 2.2s cubic-bezier(.22,.75,.25,1) infinite}
     .analysis-live-dot{width:7px;height:7px;flex:0 0 7px;border-radius:50%;background:#2563eb;box-shadow:0 0 0 3px #dbeafe;animation:analysis-pulse 1.6s ease-in-out infinite}
@@ -82,6 +87,8 @@
     .paper-detail-route #sharedSourceInspector{position:relative;inset:auto;z-index:15;grid-column:1;grid-row:2;width:auto;max-height:min(30vh,260px);min-height:0;margin:0 12px 12px;overflow:auto;border:1px solid #dbe3ee;border-radius:10px;background:#fff;padding:12px 14px;box-shadow:none}
     .paper-detail-route #paperSplitHandle,.paper-detail-route #pdfPane{grid-row:1 / span 2}
     @media(max-width:760px){.paper-detail-route #draftViewArea{grid-template-rows:none}.paper-detail-route #sharedSourceInspector{grid-column:auto;grid-row:auto;width:auto;max-height:34vh;margin:0 12px 12px}}
+    .pdf-highlight--atomic{border-radius:3px;background:rgb(250 204 21 / .24);opacity:1;mix-blend-mode:normal;transform:none;pointer-events:none;cursor:default}
+    .pdf-highlight--atomic.is-selected{background:rgb(251 146 60 / .25)!important;box-shadow:inset 0 -1px 0 rgb(234 88 12 / .7);opacity:1}
   </style>
   <script src="/static/js/sidebar.js" defer></script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -89,7 +96,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="{{ url_for('static', path='css/product-ui.css') }}">
 </head>
-<body data-page="analysis" class="flex h-screen min-h-screen flex-col overflow-hidden bg-slate-50 text-slate-800 md:flex-row{% if paper_detail_mode %} paper-detail-route{% endif %}" data-paper-id="{{ paper_id|default('') }}">
+<body data-page="analysis" class="{% if atomic_focus_mode|default(false) %}atomic-focus-mode {% endif %}flex h-screen min-h-screen flex-col overflow-hidden bg-slate-50 text-slate-800 md:flex-row{% if paper_detail_mode %} paper-detail-route{% endif %}" data-paper-id="{{ paper_id|default('') }}">
   {% set sidebar_active_tab = 'analysis' %}
 {% set sidebar_workspace_mode = false %}
 {% set sidebar_show_utilities = false %}
@@ -106,7 +113,7 @@
     <section class="analysis-page-heading mb-6 flex flex-col justify-between gap-5 sm:flex-row sm:items-center">
       <div class="max-w-2xl">
         <h1 class="text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">Paper Analysis</h1>
-        <p class="mt-2 text-sm leading-6 text-slate-500">Select a downloaded paper to extract its full text with GROBID, generate an AI analysis draft, and review the results here.</p>
+        <p class="mt-2 text-sm leading-6 text-slate-500">{% if atomic_focus_mode %}Open a downloaded paper to run only the Atomic Stance &amp; Engagement analysis. GROBID prepares its full text when needed.{% else %}Select a downloaded paper to extract its full text, generate an AI analysis draft, and review the results here.{% endif %}</p>
       </div>
       <div class="flex flex-col gap-2 sm:min-w-72">
         <label for="provider" class="text-xs font-semibold text-slate-600">AI model</label>
@@ -198,12 +205,27 @@
             <p id="atomicNavigationStatus" class="mt-2 min-h-5 text-xs leading-5 text-slate-600" role="status" aria-live="polite"></p>
           </nav>
           <section class="rounded-lg border border-slate-200 bg-white p-3" aria-labelledby="atomicCandidateHeading">
+            {% if atomic_focus_mode %}
+            <div class="flex flex-wrap items-start justify-between gap-2">
+              <div><h4 id="atomicCandidateHeading" class="text-sm font-semibold text-slate-800">Stance &amp; Engagement</h4><p class="mt-1 text-xs text-slate-500">Source-traced counts based on Hyland categories.</p></div>
+              <button id="atomicExtractButton" type="button" disabled aria-disabled="true" aria-describedby="atomicExtractionStatus" class="shrink-0 rounded-md bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300">Analyze paper</button>
+            </div>
+            <p id="atomicExtractionStatus" class="hidden mt-3 rounded-md border border-slate-200 bg-slate-50 p-3 text-xs leading-5 text-slate-700" role="status" aria-live="polite"></p>
+            <p id="atomicStanceProvenance" class="mt-2 text-[11px] leading-5 text-slate-500"></p>
+            <div id="atomicStanceTable" class="mt-3 overflow-x-auto"></div>
+            <div class="mt-4 rounded-md border border-dashed border-slate-300 bg-slate-50 p-3" aria-labelledby="atomicEvidenceHeading">
+              <h5 id="atomicEvidenceHeading" class="text-xs font-semibold uppercase tracking-wide text-slate-600">Evidence</h5>
+              <p id="atomicEvidenceEmpty" class="mt-1 text-xs leading-5 text-slate-600">Run the analysis to inspect the source evidence for each category.</p>
+              <div id="atomicStanceTrace" class="mt-2 space-y-2"></div>
+            </div>
+            {% else %}
             <div class="flex flex-wrap items-start justify-between gap-2">
               <div><h4 id="atomicCandidateHeading" class="text-sm font-semibold text-slate-800">Atomic Sentence analysis</h4><p class="mt-1 text-xs text-slate-500">AI results are source-linked candidates and require human review.</p></div>
               <button id="atomicExtractButton" type="button" aria-describedby="atomicExtractionStatus" class="shrink-0 rounded-md border border-indigo-700 bg-indigo-700 px-3 py-2 text-xs font-semibold text-white hover:bg-indigo-800">Run Atomic analysis</button>
             </div>
-            <p id="atomicExtractionStatus" class="mt-3 rounded-md border border-slate-200 bg-slate-50 p-3 text-xs leading-5 text-slate-700" role="status" aria-live="polite">Results are generated from the saved Markdown or the current PDF’s validated GROBID full-text mapping. Nothing is marked verified.</p>
+            <p id="atomicExtractionStatus" class="mt-3 rounded-md border border-slate-200 bg-slate-50 p-3 text-xs leading-5 text-slate-700" role="status" aria-live="polite">Results use the saved source and remain unverified.</p>
             <div id="atomicResults" class="mt-4 space-y-6"></div>
+            {% endif %}
           </section>
         </div>
       </div>
@@ -429,7 +451,9 @@ function renderCraftArguments(){
   activate(selectedIndex);
 }</script>
 <script src="/static/js/atomic-section-navigation.js"></script>
+{% if not atomic_focus_mode %}
 <script src="/static/js/atomic-analysis.js"></script>
+{% endif %}
 <script>
 const fields = [
   ['summary','Summary'], ['objective','Research objective'], ['methodology','Methodology'],
@@ -487,6 +511,7 @@ function render() {
     if(paper.analysis_model){const model=document.createElement('span');model.className='text-xs text-slate-500';model.textContent=`${paper.analysis_provider} · ${paper.analysis_model}`;badges.append(model)}
     if(paper.analysis_error){const error=document.createElement('p');error.className='mt-2 break-words text-xs text-rose-600';error.textContent=paper.analysis_error;info.append(title,doi,filename,badges,error)}else info.append(title,doi,filename,badges);
     const actions=document.createElement('div'); actions.className='flex shrink-0 flex-wrap gap-2';
+    const atomicOnly=document.createElement('button');atomicOnly.className='atomic-only-open rounded-xl border border-indigo-200 bg-indigo-50 px-3.5 py-2 text-sm font-semibold text-indigo-700 hover:bg-indigo-100';atomicOnly.textContent='Open Atomic';atomicOnly.addEventListener('click',()=>navigatePaper(paper));actions.append(atomicOnly);
     if(paper.analysis_status==='DONE'){
       const view=document.createElement('button');view.className='rounded-xl border border-blue-200 bg-blue-50 px-3.5 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-100';view.textContent='Xem draft';view.addEventListener('click',()=>navigatePaper(paper));actions.append(view);
       const rerun=document.createElement('button');rerun.className='rounded-xl border border-slate-300 px-3.5 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50';rerun.textContent='Reanalyze';rerun.addEventListener('click',()=>enqueue([paper.doi]));actions.append(rerun);
@@ -497,6 +522,7 @@ function render() {
     } else {
       const start=document.createElement('button');start.className='rounded-xl bg-blue-600 px-3.5 py-2 text-sm font-semibold text-white hover:bg-blue-700';start.textContent=paper.analysis_status==='FAILED'?'Retry':'Add to queue';start.addEventListener('click',()=>enqueue([paper.doi]));actions.append(start);
     }
+    for(const control of actions.querySelectorAll('button:not(.atomic-only-open)'))control.dataset.fullAnalysisControl='true';
     card.append(info,actions); listEl.append(card);
   }
 }
@@ -549,7 +575,73 @@ function releasePdfViewer(){pdfLoadVersion++;pdfLoadPromise=null;pdfLoadDoi='';i
 window.addEventListener('pagehide',releasePdfViewer);
 window.addEventListener('pageshow',event=>{if(event.persisted&&paperDetailMode)loadPdfViewer()});
 function clearPdfHighlights(){document.querySelectorAll('.pdf-highlight').forEach(item=>item.remove())}
-function highlightQuoteOnPage(pageRecord,quote,proposition){const full=pageRecord.items.map(span=>span.textContent).join(' '),normalized=normalizedText(full),needle=normalizedText(quote);if(!needle)return false;const start=normalized.indexOf(needle);if(start<0)return false;const rawMap=[];let normalizedIndex=0,lastSpace=false;for(let spanIndex=0;spanIndex<pageRecord.items.length;spanIndex++){const text=pageRecord.items[spanIndex].textContent;for(let charIndex=0;charIndex<text.length;charIndex++){const char=text[charIndex].normalize('NFKC').toLocaleLowerCase();if(/\s/.test(char)){if(!lastSpace){rawMap[normalizedIndex++]={spanIndex,charIndex};lastSpace=true}}else{for(const unit of char){rawMap[normalizedIndex++]={spanIndex,charIndex};lastSpace=false}}}if(spanIndex<pageRecord.items.length-1&&!lastSpace){rawMap[normalizedIndex++]={spanIndex,charIndex:text.length};lastSpace=true}}const first=rawMap[start],last=rawMap[start+needle.length-1];if(!first||!last)return false;const range=document.createRange();range.setStart(pageRecord.items[first.spanIndex].firstChild,first.charIndex);range.setEnd(pageRecord.items[last.spanIndex].firstChild,Math.min(pageRecord.items[last.spanIndex].textContent.length,last.charIndex+1));for(const rect of range.getClientRects()){const box=pageRecord.wrapper.getBoundingClientRect(),highlight=document.createElement('i');highlight.className='pdf-highlight'+(proposition.id===pdfSelectedId?' is-selected':'');highlight.dataset.propositionId=proposition.id;highlight.title=(proposition.argumentative_roles||[]).join(', ')+' · '+quote;highlight.style.left=(rect.left-box.left)+'px';highlight.style.top=(rect.top-box.top)+'px';highlight.style.width=rect.width+'px';highlight.style.height=rect.height+'px';if((proposition.argumentative_roles||[]).includes('claim'))highlight.style.backgroundColor='#60a5fa66';else if((proposition.argumentative_roles||[]).includes('evidence'))highlight.style.backgroundColor='#4ade8066';else if((proposition.argumentative_roles||[]).includes('warrant'))highlight.style.backgroundColor='#c084fc66';pageRecord.wrapper.append(highlight)}return true}
+function mergePdfHighlightRects(rects){
+  const lines=[];
+  for(const rect of [...rects].sort((a,b)=>a.top-b.top||a.left-b.left)){
+    const center=(rect.top+rect.bottom)/2;
+    let line=null,bestDistance=Infinity;
+    for(const candidate of lines){
+      const distance=Math.abs(candidate.center-center),tolerance=Math.max(2,Math.min(candidate.bottom-candidate.top,rect.height)*.35);
+      if(distance<=tolerance&&distance<bestDistance){line=candidate;bestDistance=distance}
+    }
+    if(!line)lines.push({top:rect.top,bottom:rect.bottom,center,rects:[rect]});
+    else{line.top=Math.min(line.top,rect.top);line.bottom=Math.max(line.bottom,rect.bottom);line.center=(line.top+line.bottom)/2;line.rects.push(rect)}
+  }
+  const merged=[];
+  for(const line of lines){
+    const ordered=line.rects.sort((a,b)=>a.left-b.left);let current=null;
+    for(const rect of ordered){
+      if(current&&rect.left<=current.right+6){current.left=Math.min(current.left,rect.left);current.right=Math.max(current.right,rect.right);current.top=Math.min(current.top,rect.top);current.bottom=Math.max(current.bottom,rect.bottom)}
+      else{if(current)merged.push(current);current={left:rect.left,right:rect.right,top:rect.top,bottom:rect.bottom}}
+    }
+    if(current)merged.push(current)
+  }
+  return merged.map(rect=>({...rect,width:rect.right-rect.left,height:rect.bottom-rect.top}))
+}
+function highlightQuoteOnPage(pageRecord,quote,proposition,context='',contextOffset=null,strictSentence=false){
+  const full=pageRecord.items.map(span=>span.textContent).join(' '),normalized=normalizedText(full),needle=normalizedText(quote);
+  if(!needle)return false;
+  let start=-1;
+  if(context&&Number.isInteger(contextOffset)){
+    const normalizedContext=normalizedText(context),contextStart=normalized.indexOf(normalizedContext);
+    if(!normalizedContext||contextStart<0||normalized.indexOf(normalizedContext,contextStart+1)>=0)return false;
+    start=contextStart-contextOffset;
+    if(start<0||normalized.slice(start,start+needle.length)!==needle)return false;
+  }else if(context){
+    const normalizedContext=normalizedText(context),contextStart=normalized.indexOf(normalizedContext),cueStart=normalizedContext.indexOf(needle);
+    if(!normalizedContext||contextStart<0||normalized.indexOf(normalizedContext,contextStart+1)>=0||cueStart<0||normalizedContext.indexOf(needle,cueStart+1)>=0)return false;
+    start=contextStart+cueStart;
+  }else start=normalized.indexOf(needle);
+  if(start<0)return false;
+  const rawMap=[];let pendingSpace=null;
+  const appendMappedUnit=(unit,position)=>{
+    if(/\s/.test(unit)){if(rawMap.length&&!pendingSpace)pendingSpace=position;return}
+    if(pendingSpace){rawMap.push(pendingSpace);pendingSpace=null}
+    rawMap.push(position)
+  };
+  for(let spanIndex=0;spanIndex<pageRecord.items.length;spanIndex++){
+    const text=pageRecord.items[spanIndex].textContent;
+    for(let charIndex=0;charIndex<text.length;charIndex++){
+      const char=text[charIndex].normalize('NFKC').toLocaleLowerCase().replace(/[\u00ad\u2010-\u2015]/g,'-');
+      for(const unit of char)appendMappedUnit(unit,{spanIndex,charIndex})
+    }
+    if(spanIndex<pageRecord.items.length-1)appendMappedUnit(' ',{spanIndex,charIndex:text.length})
+  }
+  const first=rawMap[start],last=rawMap[start+needle.length-1];if(!first||!last)return false;
+  const range=document.createRange();range.setStart(pageRecord.items[first.spanIndex].firstChild,first.charIndex);range.setEnd(pageRecord.items[last.spanIndex].firstChild,Math.min(pageRecord.items[last.spanIndex].textContent.length,last.charIndex+1));
+  const rawRects=[...range.getClientRects()],rects=strictSentence?mergePdfHighlightRects(rawRects):rawRects,pageRect=pageRecord.wrapper.getBoundingClientRect();
+  if(strictSentence&&(!rects.length||rects.reduce((sum,rect)=>sum+rect.width*rect.height,0)>pageRect.width*pageRect.height*.25))return false;
+  for(const rect of rects){
+    const box=pageRecord.wrapper.getBoundingClientRect(),highlight=document.createElement('i');
+    highlight.className='pdf-highlight'+(strictSentence?' pdf-highlight--atomic':'')+(proposition.id===pdfSelectedId?' is-selected':'')+(pdfHighlightsOn?'':' hidden');
+    highlight.dataset.propositionId=proposition.id;highlight.title=(proposition.argumentative_roles||[]).join(', ')+' · '+quote;
+    const verticalPad=strictSentence?Math.min(2.5,rect.height*.2):0;
+    highlight.style.left=(rect.left-box.left)+'px';highlight.style.top=(rect.top-box.top-verticalPad)+'px';highlight.style.width=rect.width+'px';highlight.style.height=(rect.height+verticalPad*2)+'px';
+    if((proposition.argumentative_roles||[]).includes('claim'))highlight.style.backgroundColor='#60a5fa66';else if((proposition.argumentative_roles||[]).includes('evidence'))highlight.style.backgroundColor='#4ade8066';else if((proposition.argumentative_roles||[]).includes('warrant'))highlight.style.backgroundColor='#c084fc66';
+    pageRecord.wrapper.append(highlight)
+  }
+  return true
+}
 function selectMarkdownSource(proposition){if(!markdownSourceNode||!proposition)return false;const offsets=proposition.source_offsets||{},start=Number(offsets.start),end=Number(offsets.end),points=Array.from(markdownSourceText);if(!Number.isInteger(start)||!Number.isInteger(end)||start<0||end<=start||end>points.length||points.slice(start,end).join('')!==(proposition.source_quote||'')){setPdfStatus('This evidence does not match the saved Markdown character offsets.');return false}const startUtf16=points.slice(0,start).join('').length,endUtf16=points.slice(0,end).join('').length,range=document.createRange();range.setStart(markdownSourceNode,startUtf16);range.setEnd(markdownSourceNode,endUtf16);const selection=window.getSelection();selection.removeAllRanges();selection.addRange(range);const viewer=document.getElementById('pdfViewerScroll'),rect=range.getBoundingClientRect(),viewerRect=viewer.getBoundingClientRect();viewer.scrollTo({top:Math.max(0,viewer.scrollTop+rect.top-viewerRect.top-viewer.clientHeight*.32),behavior:'smooth'});document.getElementById('pdfPageLabel').textContent=`Characters ${start+1}–${end}`;setPdfStatus('');return true}
 function selectPdfSource(proposition){if(!paperDetailMode||!proposition)return;pdfSelectedId=proposition.id;if(isMarkdownPaper()){selectMarkdownSource(proposition);return}if(!pdfDocument||!pdfPages.length)return;clearPdfHighlights();const quote=proposition.source_quote;if(!quote||proposition.is_inferred){setPdfStatus('This item has no direct source quote to locate in the PDF.');return}let matches=pdfPages.filter(page=>normalizedText(page.text).includes(normalizedText(quote)));if(proposition.source_page){const hinted=pdfPages.find(page=>page.pageNumber===Number(proposition.source_page));if(hinted&&normalizedText(hinted.text).includes(normalizedText(quote)))matches=[hinted]}const found=matches[0];if(!found||!highlightQuoteOnPage(found,quote,proposition)){setPdfStatus('No exact source match was found in the PDF text.');return}setPdfStatus('');const viewer=document.getElementById('pdfViewerScroll');document.getElementById('pdfPageLabel').textContent='Page '+found.pageNumber+' of '+pdfDocument.numPages;const target=[...found.wrapper.querySelectorAll('.pdf-highlight')].find(item=>item.dataset.propositionId===proposition.id);document.querySelectorAll('.pdf-highlight').forEach(item=>item.classList.toggle('is-selected',item.dataset.propositionId===proposition.id));if(target){const highlightRect=target.getBoundingClientRect(),viewerRect=viewer.getBoundingClientRect(),desiredTop=viewer.scrollTop+highlightRect.top-viewerRect.top-viewer.clientHeight*.32,maxTop=Math.max(0,viewer.scrollHeight-viewer.clientHeight);viewer.scrollTo({top:Math.max(0,Math.min(maxTop,desiredTop)),behavior:'smooth'})}}
 function uiText(parent,tag,cls,value){const e=document.createElement(tag);e.className=cls;e.textContent=value||'';parent.append(e);return e}
@@ -619,6 +711,63 @@ function navigateToAtomicSection(sectionId){
     document.querySelectorAll('.pdf-highlight').forEach(item=>{if(item.dataset.propositionId===marker.id)item.remove()});downgradeAtomicSectionPosition(sectionId,mapping);notice.textContent='Moved to page '+mapping.page+'; exact text position could not be verified, so no highlight was added.';return;
   }
   notice.textContent='Moved to page '+mapping.page+'. Exact text position is unavailable.';
+}
+async function navigateToAtomicEvidence(entry){
+  const notice=document.getElementById('atomicNavigationStatus'),quote=String(entry?.quote||''),context=String(entry?.context||'');
+  const report=(message,error=false)=>{if(notice)notice.textContent=message;if(paperDetailMode)setPdfStatus(message,error)};
+  if(!paperDetailMode){report('Open this paper in its detail view to highlight evidence in the PDF.');return}
+  if(isMarkdownPaper()){report('PDF highlighting is unavailable for this source.');return}
+  if(!quote||!context){report('This evidence has no complete source context to locate safely.');return}
+  if(!pdfPages.length)await loadPdfViewer();
+  if(!pdfDocument||!pdfPages.length){report('The PDF is not ready. Wait for it to load, then click the evidence again.');return}
+  const hintedPage=Number.isInteger(Number(entry.page))&&Number(entry.page)>0?Number(entry.page):atomicSectionMappings.get(String(entry.section_id||''))?.page;
+  const contextMatches=pages=>pages.filter(page=>normalizedText(page.text).includes(normalizedText(context)));
+  let matches=contextMatches(hintedPage?pdfPages.filter(page=>page.pageNumber===hintedPage):pdfPages);
+  if(!matches.length&&hintedPage)matches=contextMatches(pdfPages);
+  if(matches.length!==1){report(matches.length?'The source excerpt appears on multiple PDF pages, so it was not highlighted.':'The exact source excerpt could not be matched to the PDF text.');return}
+  const page=matches[0],sourceSentence=atomicSourceSentence(entry),sentence=sourceSentence||atomicSentenceAroundEvidence(page,entry),id='atomic-evidence-'+String(entry.start_offset??'x')+'-'+String(entry.end_offset??'x');
+  if(!sentence){report('The full sentence could not be identified safely in the PDF text.');return}
+  const normalizedSentence=normalizedText(sentence),normalizedContext=normalizedText(context),contextOffset=normalizedSentence.indexOf(normalizedContext);
+  if(!normalizedContext||contextOffset<0||normalizedSentence.indexOf(normalizedContext,contextOffset+1)>=0||sentence.length>1200||sentence.length>String(page.text||'').length*.6){report('The sentence boundary was ambiguous, so no highlight was added.');return}
+  clearPdfHighlights();pdfSelectedId=id;
+  if(!highlightQuoteOnPage(page,sentence,{id,argumentative_roles:[]},context,contextOffset,true)){pdfSelectedId=null;report('The full sentence could not be uniquely highlighted in the PDF.');return}
+  setActiveAtomicSection(String(entry.section_id||''));setPdfStatus('');
+  document.getElementById('pdfPageLabel').textContent='Page '+page.pageNumber+' of '+pdfDocument.numPages;
+  const target=[...page.wrapper.querySelectorAll('.pdf-highlight')].find(item=>item.dataset.propositionId===id),viewer=document.getElementById('pdfViewerScroll');
+  if(target&&viewer){atomicProgrammaticScroll=true;clearTimeout(atomicProgrammaticSyncTimer);atomicProgrammaticSyncTimer=setTimeout(()=>{atomicProgrammaticScroll=false;atomicLastVisiblePage=atomicVisiblePdfPage()},1600);const highlightRect=target.getBoundingClientRect(),viewerRect=viewer.getBoundingClientRect(),desiredTop=viewer.scrollTop+highlightRect.top-viewerRect.top-viewer.clientHeight*.32,maxTop=Math.max(0,viewer.scrollHeight-viewer.clientHeight);viewer.scrollTo({top:Math.max(0,Math.min(maxTop,desiredTop)),behavior:'smooth'})}
+  report('Highlighted the full sentence containing “'+quote+'” on PDF page '+page.pageNumber+'.');
+}
+function atomicSourceSentence(entry){
+  const start=Number(entry?.start_offset),end=Number(entry?.end_offset),quote=String(entry?.quote||''),sections=Array.isArray(argumentationData?.sections)?argumentationData.sections:[];
+  if(!Number.isInteger(start)||!Number.isInteger(end)||!quote)return '';
+  const section=sections.find(item=>Number.isInteger(Number(item.start_offset))&&Number.isInteger(Number(item.end_offset))&&Number(item.start_offset)<=start&&end<=Number(item.end_offset)&&typeof item.text==='string');
+  if(!section)return '';
+  const localStart=start-Number(section.start_offset),localEnd=end-Number(section.start_offset),points=Array.from(section.text);
+  if(localStart<0||localEnd>points.length||points.slice(localStart,localEnd).join('')!==quote)return '';
+  const utf16Start=points.slice(0,localStart).join('').length;
+  if(typeof Intl.Segmenter==='function'){
+    const segmenter=new Intl.Segmenter(undefined,{granularity:'sentence'});
+    for(const item of segmenter.segment(section.text))if(item.index<=utf16Start&&utf16Start<item.index+item.segment.length)return item.segment.trim();
+  }
+  const boundaries=[...section.text.matchAll(/[.!?][\"'’”)]*\s+/g)],previous=boundaries.filter(item=>item.index+item[0].length<=utf16Start).at(-1),next=boundaries.find(item=>item.index>=utf16Start);
+  const sentence=section.text.slice(previous?previous.index+previous[0].length:0,next?next.index+1:section.text.length).trim();
+  return sentence
+}
+function atomicSentenceAroundEvidence(page,entry){
+  const text=normalizedText(page?.text||''),context=normalizedText(entry?.context||''),quote=normalizedText(entry?.quote||'');
+  if(!text||!context||!quote)return '';
+  const contextStart=text.indexOf(context),cueStart=context.indexOf(quote);
+  if(contextStart<0||text.indexOf(context,contextStart+1)>=0||cueStart<0||context.indexOf(quote,cueStart+1)>=0)return '';
+  const markerOffset=contextStart+cueStart;
+  if(typeof Intl.Segmenter==='function'){
+    const segmenter=new Intl.Segmenter(undefined,{granularity:'sentence'});
+    for(const item of segmenter.segment(text))if(item.index<=markerOffset&&markerOffset<item.index+item.segment.length)return item.segment.trim();
+  }
+  let start=markerOffset,end=markerOffset;
+  while(start>0&&!/[.!?]/.test(text[start-1]))start--;
+  while(end<text.length&&!/[.!?]/.test(text[end]))end++;
+  if(end<text.length)end++;
+  return text.slice(start,end).trim()
 }
 function atomicVisiblePdfPage(){
   const viewer=document.getElementById('pdfViewerScroll');if(!viewer||!pdfPages.length)return null;const bounds=viewer.getBoundingClientRect();let bestPage=null,bestOverlap=0,tied=false;
@@ -989,7 +1138,7 @@ document.getElementById('toggleGraphExpand').addEventListener('click',event=>{co
 document.getElementById('toggleHighlights').addEventListener('click',event=>{pdfHighlightsOn=!pdfHighlightsOn;event.currentTarget.setAttribute('aria-pressed',String(pdfHighlightsOn));event.currentTarget.textContent=pdfHighlightsOn?'Highlights on':'Highlights off';document.querySelectorAll('.pdf-highlight').forEach(item=>item.classList.toggle('hidden',!pdfHighlightsOn))});
 document.getElementById('pdfZoomOut').addEventListener('click',()=>{pdfZoom=Math.max(.65,pdfZoom-.1);document.getElementById('pdfZoomLevel').textContent=Math.round(pdfZoom*100)+'%';loadPdfViewer(true)});document.getElementById('pdfZoomIn').addEventListener('click',()=>{pdfZoom=Math.min(1.8,pdfZoom+.1);document.getElementById('pdfZoomLevel').textContent=Math.round(pdfZoom*100)+'%';loadPdfViewer(true)});
 const splitter=document.getElementById('paperSplitHandle');splitter.addEventListener('pointerdown',event=>{splitter.setPointerCapture(event.pointerId);splitter.dataset.dragging='true'});splitter.addEventListener('pointermove',event=>{if(splitter.dataset.dragging!=='true')return;const rect=document.getElementById('draftViewArea').getBoundingClientRect(),percent=Math.max(28,Math.min(72,(event.clientX-rect.left)/rect.width*100));document.getElementById('draftViewArea').style.setProperty('--explorer-width',percent+'%')});splitter.addEventListener('pointerup',()=>splitter.dataset.dragging='false');splitter.addEventListener('keydown',event=>{if(!['ArrowLeft','ArrowRight'].includes(event.key))return;event.preventDefault();const area=document.getElementById('draftViewArea'),current=parseFloat(getComputedStyle(area).getPropertyValue('--explorer-width'))||48;area.style.setProperty('--explorer-width',Math.max(28,Math.min(72,current+(event.key==='ArrowRight'?3:-3)))+'%')});
-document.addEventListener('click',event=>{if(!paperDetailMode)return;const propButton=event.target.closest('[data-proposition-id]'),nodeButton=event.target.closest('[data-node-id]');setTimeout(()=>{let proposition=propButton?argumentationData?.propositions?.find(item=>item.id===propButton.dataset.propositionId):null;if(!proposition&&nodeButton){const node=(aifState.graph?.nodes||[]).find(item=>item.id===nodeButton.dataset.nodeId);proposition=argumentationData?.propositions?.find(item=>item.id===node?.proposition_id)}if(!proposition&&!nodeButton&&!propButton&&selectedPropositionId)proposition=argumentationData?.propositions?.find(item=>item.id===selectedPropositionId);if(proposition&&proposition.id!==pdfSelectedId)selectPdfSource(proposition)},0)});
+document.addEventListener('click',event=>{if(!paperDetailMode||event.target.closest('[data-atomic-evidence]'))return;const propButton=event.target.closest('[data-proposition-id]'),nodeButton=event.target.closest('[data-node-id]');setTimeout(()=>{let proposition=propButton?argumentationData?.propositions?.find(item=>item.id===propButton.dataset.propositionId):null;if(!proposition&&nodeButton){const node=(aifState.graph?.nodes||[]).find(item=>item.id===nodeButton.dataset.nodeId);proposition=argumentationData?.propositions?.find(item=>item.id===node?.proposition_id)}if(!proposition&&!nodeButton&&!propButton&&selectedPropositionId)proposition=argumentationData?.propositions?.find(item=>item.id===selectedPropositionId);if(proposition&&proposition.id!==pdfSelectedId)selectPdfSource(proposition)},0)});
 async function loadCrossPaper(){try{const r=await fetch('/api/analysis/cross-paper'),d=await r.json(),list=document.getElementById('crossPaperList');list.replaceChildren();const batch=d.batch;document.getElementById('crossPaperStatus').textContent=batch?('Run '+batch.id+' · '+batch.status+' · '+(batch.model||batch.provider||'')+' - candidates awaiting review'):'No comparisons yet.';for(const x of d.relationships||[]){const card=document.createElement('article');card.className='rounded-xl border border-slate-200 bg-white p-4';uiText(card,'h3','font-semibold text-slate-900',x.relationship.replaceAll('_',' ')+' · '+x.review_status+(x.stale?' - stale':''));uiText(card,'p','mt-2 text-sm leading-6 text-slate-700',x.explanation);const quotes=document.createElement('div');quotes.className='mt-3 grid gap-2 md:grid-cols-2';uiText(quotes,'blockquote','rounded-lg bg-slate-50 p-3 text-xs leading-5 text-slate-700',x.source_doi+' · “'+x.source_quote+'”');uiText(quotes,'blockquote','rounded-lg bg-slate-50 p-3 text-xs leading-5 text-slate-700',x.target_doi+' · “'+x.target_quote+'”');card.append(quotes);uiText(card,'p','mt-2 text-xs text-slate-500','AI confidence '+Math.round((x.confidence||0)*100)+'% · '+(x.provenance?.model||''));const actions=document.createElement('div');actions.className='mt-3 flex gap-2';for(const [decision,label] of [['approved','Approve candidate'],['rejected','Reject']]){const b=uiText(actions,'button','rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700',label+(x.review_status===decision?' (saved)':''));b.disabled=x.review_status===decision;b.onclick=async()=>{const r=await fetch('/api/analysis/cross-paper/'+x.id+'/review',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({decision})});if(r.ok)await loadCrossPaper()}}card.append(actions);list.append(card)}if(!list.children.length&&batch?.status==='DONE')uiText(list,'p','text-sm text-slate-500','No sufficiently supported candidates were found among the approved propositions.')}catch(e){document.getElementById('crossPaperStatus').textContent=e.message}}
 document.getElementById('crossPaperBtn').addEventListener('click',async()=>{const b=document.getElementById('crossPaperBtn'),s=document.getElementById('crossPaperStatus');b.disabled=true;s.textContent='Comparing approved propositions...';try{const r=await fetch('/api/analysis/cross-paper',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider:document.getElementById('provider').value})}),d=await r.json();if(!r.ok)throw Error(d.error||'Could not analyze cross-paper relationships.');s.textContent='Created '+d.candidate_count+' candidates; all require reviewer confirmation.';await loadCrossPaper()}catch(e){s.textContent=e.message}finally{b.disabled=false}});
 function editRelationForm(parent,id){const relation=(argumentationData?.relations||[]).find(x=>x.id===id);if(!relation)return;const form=document.createElement('details');form.className='mt-3 rounded border bg-white';uiText(form,'summary','cursor-pointer p-3 text-sm font-semibold','Edit relation and graph target');const body=document.createElement('div');body.className='space-y-2 border-t p-3';const kind=document.createElement('select');kind.className='w-full rounded border bg-white p-2 text-sm';for(const v of ['supports','undermine','undercut','rebut','qualifies','extends']){const o=document.createElement('option');o.value=v;o.textContent=v;kind.append(o)}kind.value=relation.relation_type;body.append(kind);const premises=document.createElement('input');premises.className='w-full rounded border p-2 text-sm';premises.value=relation.premise_ids.join(', ');premises.placeholder='Premise IDs, comma-separated';body.append(premises);const conclusion=document.createElement('input');conclusion.className='w-full rounded border p-2 text-sm';conclusion.value=relation.conclusion_id||'';conclusion.placeholder='Conclusion ID';body.append(conclusion);const target=document.createElement('input');target.className='w-full rounded border p-2 text-sm';target.value=relation.target_id||'';target.placeholder='Proposition ID or undercut RA ID';body.append(target);const targetKind=document.createElement('select');targetKind.className='w-full rounded border bg-white p-2 text-sm';for(const v of ['proposition','inference']){const o=document.createElement('option');o.value=v;o.textContent=v;targetKind.append(o)}targetKind.value=relation.target_kind||'proposition';body.append(targetKind);const explanation=document.createElement('textarea');explanation.className='w-full rounded border p-2 text-sm';explanation.rows=3;explanation.value=relation.explanation||'';body.append(explanation);const save=uiText(body,'button','rounded bg-blue-600 px-3 py-2 text-sm font-semibold text-white','Save relationship');save.type='button';save.onclick=async()=>{const r=await fetch('/api/analysis/edit/'+encodeURIComponent(currentDoi),{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({item_id:id,item_type:'relation',changes:{relation_type:kind.value,premise_ids:premises.value.split(',').map(x=>x.trim()).filter(Boolean),conclusion_id:conclusion.value||null,target_id:target.value||null,target_kind:targetKind.value,explanation:explanation.value},note:'Human graph correction'})}),d=await r.json();if(!r.ok)notice(d.error,true);else await openDraft(currentPaper)};form.append(body);parent.append(form)}
@@ -997,6 +1146,98 @@ loadCrossPaper();
 (async()=>{if(paperDetailMode){document.getElementById('draftModal').setAttribute('aria-modal','false');document.getElementById('draftViewArea').append(document.getElementById('paperWorkspace'))}try{config=await(await fetch('/api/analysis/config')).json();document.getElementById('provider').value=config.default_provider||'ollama';const gemini=document.querySelector('#provider option[value="gemini"]');gemini.disabled=!config.gemini_configured;providerHint()}catch{}await loadPapers();if(paperDetailMode){const doi=document.body.dataset.paperId,paper=currentPapers.find(item=>item.doi===doi);if(!paper){setPdfStatus('This paper is not available in the analysis library.',true);document.getElementById('draftTitle').textContent='Paper not found';renderAtomicPaperContext({doi});renderAtomicSections('error');return}const index=currentPapers.indexOf(paper);document.getElementById('paperPrev').disabled=index<=0;document.getElementById('paperNext').disabled=index===currentPapers.length-1;document.getElementById('paperBreadcrumbTitle').textContent=paper.title||paper.doi;document.getElementById('paperAuthorsMeta').textContent=[paper.authors,paper.year,paper.journal].filter(Boolean).join(' ? ');await openDraft(paper);await loadPdfViewer()}else setInterval(loadPapers,5000)})();
 </script>
 <script>
+{% if atomic_focus_mode %}
+const atomicStanceGroups=[['stance','Stance'],['engagement','Engagement']];
+function atomicText(tag,className,text){const node=document.createElement(tag);node.className=className;node.textContent=text;return node}
+async function atomicResponseJson(response){const body=await response.text();try{return body.trim()?JSON.parse(body):{}}catch{const detail=body.replace(/\s+/g,' ').trim().slice(0,240)||response.statusText||'Empty response';throw Error('Server returned a non-JSON response (HTTP '+response.status+'): '+detail)}}
+function renderAtomicStanceEvidence(groups){
+  const root=document.getElementById('atomicStanceTrace'),empty=document.getElementById('atomicEvidenceEmpty');
+  if(!root||!empty)return;
+  root.replaceChildren();
+  const categories=groups.flatMap(group=>Array.isArray(group?.categories)?group.categories:[]);
+  const total=categories.reduce((sum,item)=>sum+(Array.isArray(item.evidence)?item.evidence.length:0),0);
+  empty.textContent=total?'Expand a category to inspect its validated markers and exact source excerpts. Counts still require human review.':'No source evidence is available in this result.';
+  for(const item of categories){
+    const evidence=Array.isArray(item.evidence)?item.evidence:[];
+    const details=document.createElement('details');details.className='overflow-hidden rounded border border-slate-200 bg-white';
+    const summary=atomicText('summary','cursor-pointer px-3 py-2 text-xs font-semibold text-slate-800 hover:bg-slate-50',`${item.label||'Category'} · ${evidence.length} ${evidence.length===1?'item':'items'}`);details.append(summary);
+    const body=document.createElement('div');body.className='space-y-2 border-t border-slate-100 p-3';
+    if(!evidence.length){body.append(atomicText('p','text-xs text-slate-500','No validated evidence for this category.'))}
+    for(const entry of evidence){
+      const card=document.createElement('article');card.className='rounded bg-slate-50 p-3';
+      const marker=document.createElement('p');marker.className='text-xs text-slate-700';marker.append(document.createTextNode('Marker: '));
+      const markerText=document.createElement('code');markerText.className='rounded bg-blue-100 px-1 py-0.5 font-semibold text-blue-900';markerText.textContent=String(entry.quote||'');marker.append(markerText);card.append(marker);
+      const context=String(entry.context||entry.quote||'');
+      const contextNode=document.createElement('button');contextNode.type='button';contextNode.dataset.atomicEvidence='true';contextNode.className='mt-2 block w-full cursor-pointer rounded border border-slate-200 bg-white px-2 py-1 text-left text-xs leading-5 text-slate-700 hover:border-blue-300 hover:bg-blue-50 focus:outline-none focus:ring-2 focus:ring-blue-500';contextNode.title='Click to highlight the whole sentence in the PDF';
+      const quote=String(entry.quote||''),quoteStart=quote?context.indexOf(quote):-1;
+      if(quoteStart<0)contextNode.textContent=context;
+      else{contextNode.append(document.createTextNode(context.slice(0,quoteStart)));const highlighted=document.createElement('mark');highlighted.className='rounded bg-yellow-100 px-0.5 text-slate-900';highlighted.textContent=quote;contextNode.append(highlighted,document.createTextNode(context.slice(quoteStart+quote.length)))}
+      contextNode.setAttribute('aria-label','Highlight the whole sentence containing marker '+quote+' in the PDF');contextNode.addEventListener('click',()=>{void navigateToAtomicEvidence(entry)});
+      card.append(contextNode);
+      const location=[];if(entry.section_id)location.push('Section '+entry.section_id);if(Number.isInteger(entry.page))location.push('Page '+entry.page);
+      if(Number.isInteger(entry.start_offset)&&Number.isInteger(entry.end_offset))location.push(`Characters ${entry.start_offset}–${entry.end_offset}`);
+      card.append(atomicText('p','mt-2 text-[11px] text-slate-500',location.join(' · ')||'Source location unavailable'));
+      body.append(card)
+    }
+    details.append(body);root.append(details)
+  }
+}
+function renderAtomicStanceResult(result){
+  const status=document.getElementById('atomicExtractionStatus'),root=document.getElementById('atomicStanceTable');
+  if(!status||!root)return;
+  root.replaceChildren();
+  if(!result){renderAtomicStanceEvidence([]);status.classList.add('hidden');status.textContent='';return}
+  status.classList.add('hidden');
+  const stance=result.categories?.stance||{},engagement=result.categories?.engagement||{};
+  const left=Array.isArray(stance.categories)?stance.categories:[],right=Array.isArray(engagement.categories)?engagement.categories:[];
+  renderAtomicStanceEvidence([stance,engagement]);
+  const format=value=>value==null?'—':Number(value).toFixed(1);
+  const wrapper=document.createElement('div');wrapper.className='overflow-x-auto';
+  const table=document.createElement('table');table.className='w-full min-w-[720px] border-collapse text-left text-sm';
+  const caption=document.createElement('caption');caption.className='mb-3 text-left text-base font-semibold text-slate-800';caption.textContent='Stance and Engagement features in this paper';table.append(caption);
+  const thead=document.createElement('thead');
+  const groupHead=document.createElement('tr');groupHead.className='border-y-2 border-slate-800 text-slate-900';
+  for(const [label,span] of [['Stance',3],['Engagement',3]]){const cell=atomicText('th','px-3 py-2 font-semibold',label);cell.colSpan=span;groupHead.append(cell)}
+  thead.append(groupHead);
+  const columnHead=document.createElement('tr');columnHead.className='border-b-2 border-slate-800 text-slate-700';
+  for(const label of ['Category','Items per 1000 words','% of total','Category','Items per 1000 words','% of total'])columnHead.append(atomicText('th','px-3 py-2 font-medium',label));
+  thead.append(columnHead);table.append(thead);
+  const tbody=document.createElement('tbody'),rowCount=Math.max(left.length,right.length);
+  for(let index=0;index<rowCount;index++){
+    const row=document.createElement('tr');row.className='border-b border-slate-200';
+    for(const item of [left[index],right[index]]){
+      row.append(atomicText(item?'th':'td',item?'px-3 py-2 font-medium text-slate-800':'px-3 py-2',''+(item?.label||'')));
+      row.append(atomicText('td','px-3 py-2 tabular-nums text-slate-700',item?format(item.per_1000_words):''));
+      row.append(atomicText('td','px-3 py-2 tabular-nums text-slate-700',item?format(item.percent_of_group):''));
+    }
+    tbody.append(row);
+  }
+  const total=document.createElement('tr');total.className='border-t-2 border-slate-800 font-semibold';
+  for(const group of [stance,engagement]){
+    total.append(atomicText('th','px-3 py-2 text-slate-900','Totals'));
+    total.append(atomicText('td','px-3 py-2 tabular-nums text-slate-900',format(group.total_per_1000_words)));
+    total.append(atomicText('td','px-3 py-2 tabular-nums text-slate-900',group.total_count?'100.0':'—'));
+  }
+  tbody.append(total);table.append(tbody);wrapper.append(table);root.append(wrapper)
+}
+async function loadAtomicStanceResult(){
+  const button=document.getElementById('atomicExtractButton'),status=document.getElementById('atomicExtractionStatus'),paper=currentPaper,doi=currentDoi;
+  if(!button||!status||!paper||!doi)return;
+  button.disabled=paper.source_kind!=='pdf';button.title=button.disabled?'A saved PDF is required.':'Run only the source-traced Stance and Engagement analysis.';
+  try{const response=await fetch('/api/analysis/atomic/stance-engagement/'+encodeURIComponent(doi)),data=await atomicResponseJson(response);if(currentDoi!==doi)return;if(!response.ok)throw Error(data.error||'Could not load the saved result.');renderAtomicStanceResult(data.result);if(data.stale){status.classList.remove('hidden');status.textContent=data.stale_reason==='analysis_version'?'Analysis rules updated. Run again.':'Source changed. Run again.'}}catch(error){if(currentDoi===doi){status.classList.remove('hidden');status.textContent=error.message||'Could not load the saved result.'}}
+}
+    const openDraftBeforeAtomicFocus=openDraft;
+openDraft=async function(paper){await openDraftBeforeAtomicFocus(paper);if(document.body.classList.contains('atomic-focus-mode')){selectDraftTab('atomic');void loadAtomicStanceResult()}};
+document.getElementById('draftTabAtomic').addEventListener('click',()=>{void loadAtomicStanceResult()});
+document.getElementById('draftTabAtomic').addEventListener('focus',()=>{void loadAtomicStanceResult()});
+document.getElementById('atomicExtractButton').addEventListener('click',async()=>{
+  if(!currentDoi||!currentPaper)return;const button=document.getElementById('atomicExtractButton'),status=document.getElementById('atomicExtractionStatus'),doi=currentDoi;
+  button.disabled=true;button.textContent='Analyzing…';status.classList.remove('hidden');status.textContent='Analyzing…';
+  try{const response=await fetch('/api/analysis/atomic/stance-engagement/'+encodeURIComponent(doi),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider:document.getElementById('provider').value})}),data=await atomicResponseJson(response);if(!response.ok)throw Error(data.error||'Analysis failed.');if(currentDoi!==doi)return;renderAtomicStanceResult(data.result);}
+  catch(error){status.classList.remove('hidden');status.textContent=error.message||'Analysis failed.'}
+  finally{if(currentDoi===doi){button.textContent='Analyze paper';button.disabled=currentPaper?.source_kind!=='pdf'}}
+});
+{% endif %}
 const mvp3Dimensions=[['logical_validity','Logical validity'],['evidence_sufficiency','Evidence sufficiency'],['evidence_credibility','Evidence credibility'],['relevance','Relevance'],['attack_resilience','Attack resilience'],['scientific_qualification','Scientific qualification']];
 function renderMvp3Evaluation(){
   const list=document.getElementById('mvp3ArgumentList'),benchmarkBox=document.getElementById('mvp3Benchmark');

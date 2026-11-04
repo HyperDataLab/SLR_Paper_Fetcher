@@ -34,6 +34,9 @@ _BROWSER_START_TASK = None
 _UI_OPEN_TASK = None
 _SAFFRON_START_TASK = None
 _SAFFRON_RETRY_LOCKS = {}
+_ATOMIC_STANCE_LOCKS = {}
+# Temporary UI focus switch. Set to False to restore the other analysis modules.
+ATOMIC_FOCUS_MODE = True
 _SAFFRON_RUNTIME_STATE = {"status": "disabled", "message": "SAFFRON is disabled."}
 _OPENALEX_BACKFILL_LOCK = threading.Lock()
 _OPENALEX_BACKFILL_STATE = {
@@ -306,7 +309,7 @@ async def repository_page(request: Request):
 
 @app.get("/analysis", response_class=HTMLResponse)
 async def analysis_page(request: Request):
-    response = templates.TemplateResponse(request=request, name="analysis.html", context={"paper_detail_mode": False, "active_tab": "analysis", "vnu_configured": bool(settings.VNU_LIBRARY_ID and settings.VNU_LIBRARY_PASSWORD)})
+    response = templates.TemplateResponse(request=request, name="analysis.html", context={"paper_detail_mode": False, "active_tab": "analysis", "vnu_configured": bool(settings.VNU_LIBRARY_ID and settings.VNU_LIBRARY_PASSWORD), "atomic_focus_mode": ATOMIC_FOCUS_MODE})
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
     return response
 
@@ -329,6 +332,7 @@ async def paper_analysis_page(request: Request, doi: str):
     response = templates.TemplateResponse(request=request, name="analysis.html", context={
         "paper_detail_mode": True, "paper_id": normalized, "active_tab": "analysis",
         "vnu_configured": bool(settings.VNU_LIBRARY_ID and settings.VNU_LIBRARY_PASSWORD),
+        "atomic_focus_mode": ATOMIC_FOCUS_MODE,
     })
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
     return response
@@ -546,7 +550,19 @@ async def analysis_draft(doi: str):
         return JSONResponse({"error": "Invalid DOI."}, status_code=400)
     record = await asyncio.to_thread(get_store().get_analysis, normalized)
     if not record or record.get("status") != "DONE" or not record.get("draft"):
-        return JSONResponse({"error": "No completed analysis draft is available."}, status_code=404)
+        paper = await asyncio.to_thread(get_store().get, normalized)
+        if not paper or not _valid_analysis_source(paper.get("file_path")) or Path(paper["file_path"]).suffix.lower() != ".pdf":
+            return JSONResponse({"error": "No completed analysis draft or saved PDF is available."}, status_code=404)
+        try:
+            metadata = json.loads(paper.get("metadata") or "{}")
+        except (TypeError, ValueError):
+            metadata = {}
+        return {"analysis": {
+            "doi": normalized, "status": (record or {}).get("status", "NOT_STARTED"),
+            "run_status": (record or {}).get("status", "NOT_STARTED"),
+            "provider": "", "model": "", "draft": {"grobid": metadata, "analysis": {}},
+            "argumentation": None,
+        }}
     try:
         draft = json.loads(record["draft"])
     except (TypeError, ValueError):
@@ -567,6 +583,77 @@ async def analysis_draft(doi: str):
         },
     }
     return {"analysis": record}
+
+
+@app.get("/api/analysis/atomic/stance-engagement/{doi:path}")
+async def get_atomic_stance_engagement(doi: str):
+    normalized = _analysis_paper_id(doi)
+    if not normalized:
+        return JSONResponse({"error": "Invalid paper identifier."}, status_code=400)
+    store = get_store()
+    saved = await asyncio.to_thread(store.get_atomic_stance_analysis, normalized)
+    if not saved:
+        return {"result": None}
+    result = saved.get("artifact")
+    from atomic_stance import PROMPT_VERSION
+    if (not isinstance(result, dict)
+            or (result.get("provenance") or {}).get("prompt_version") != PROMPT_VERSION):
+        return {"result": None, "stale": True, "stale_reason": "analysis_version"}
+    try:
+        paper = await asyncio.to_thread(store.get, normalized)
+        from ai_analysis import _load_and_validate_fulltext_mapping
+        mapping = await asyncio.to_thread(
+            _load_and_validate_fulltext_mapping,
+            Path((paper or {}).get("file_path") or "").with_suffix(".fulltext.json"),
+        )
+    except Exception:
+        return {"result": None, "stale": True}
+    current_hash = mapping.get("metadata", {}).get("pdf_artifact", {}).get("sha256")
+    if not result or saved.get("source_pdf_sha256") != current_hash:
+        return {"result": None, "stale": True}
+    return {"result": result}
+
+
+@app.post("/api/analysis/atomic/stance-engagement/{doi:path}")
+async def analyze_atomic_stance_engagement(doi: str, request: Request):
+    normalized = _analysis_paper_id(doi)
+    if not normalized:
+        return JSONResponse({"error": "Invalid paper identifier."}, status_code=400)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "Invalid JSON request."}, status_code=400)
+    provider = str((body if isinstance(body, dict) else {}).get("provider") or settings.AI_DEFAULT_PROVIDER or "ollama").strip().lower()
+    if provider not in {"ollama", "gemini"}:
+        return JSONResponse({"error": "Invalid AI provider."}, status_code=400)
+    if provider == "gemini" and not settings.GEMINI_API_KEY:
+        return JSONResponse({"error": "GEMINI_API_KEY is not configured in .env."}, status_code=400)
+
+    lock = _ATOMIC_STANCE_LOCKS.setdefault(normalized, asyncio.Lock())
+    async with lock:
+        store = get_store()
+        paper = await asyncio.to_thread(store.get, normalized)
+        if not paper or paper.get("status") != "DOWNLOADED" or Path(paper.get("file_path") or "").suffix.lower() != ".pdf":
+            return JSONResponse({"error": "A saved PDF source is required for this analysis."}, status_code=409)
+        try:
+            from ai_analysis import _grobid_extract_pdf, _load_and_validate_fulltext_mapping
+            from atomic_stance import analyze_stance_engagement
+            mapping_path = Path(paper["file_path"]).with_suffix(".fulltext.json")
+            # Reuse a validated checkpoint or create one through GROBID only; do not run other AI modules.
+            mapping, _grobid_metadata = await asyncio.to_thread(_grobid_extract_pdf, Path(paper["file_path"]))
+            result = await asyncio.to_thread(analyze_stance_engagement, mapping, provider)
+            # Revalidate the current PDF after model work to prevent saving stale offsets.
+            current_mapping = await asyncio.to_thread(_load_and_validate_fulltext_mapping, mapping_path)
+            if current_mapping.get("metadata", {}).get("pdf_artifact", {}).get("sha256") != result["provenance"]["source_pdf_sha256"]:
+                return JSONResponse({"error": "The source PDF changed during analysis. Run the analysis again."}, status_code=409)
+            saved = await asyncio.to_thread(store.save_atomic_stance_analysis, normalized, result)
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=409)
+        except Exception as exc:
+            return JSONResponse({"error": str(exc)[:500]}, status_code=502)
+        if not saved:
+            return JSONResponse({"error": "The paper source changed before Atomic results could be saved. Reload and run again."}, status_code=409)
+        return {"success": True, "result": result}
 
 
 @app.post("/api/analysis/saffron/retry")
