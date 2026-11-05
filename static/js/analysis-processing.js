@@ -66,6 +66,7 @@
       this.activeModuleId = null;
       this.handoffAnimation = null;
       this.droneAnimation = null;
+      this.introAnimations = [];
     }
 
     async start(paper, { onViewResults, demo = false } = {}) {
@@ -82,6 +83,7 @@
       this.stopped = false;
       this.handoffAnimation?.cancel();
       this.droneAnimation?.cancel();
+      this.cancelIntroAnimations();
       this.workspace?.remove();
       window.removeEventListener('resize', this.resizeHandler);
       this.activeModuleId = null;
@@ -89,9 +91,13 @@
       this.build();
       this.logSnapshot();
       this.render();
+      const introWorkspace = this.workspace;
+      const introPromise = this.playIntro();
       if (this.demo) {
         this.refs.consoleMeta.textContent = 'DEMO | local stage simulation | no analysis request';
-        this.scheduleDemo(900);
+        introPromise.then(() => {
+          if (this.workspace === introWorkspace && this.demo && !this.stopped) this.scheduleDemo(900);
+        });
         return;
       }
       if (this.status === 'DONE') {
@@ -105,6 +111,7 @@
       if (!this.root) return;
       this.workspace = element('section', 'research-processing');
       this.workspace.setAttribute('aria-label', 'Paper analysis processing workspace');
+      this.workspace.dataset.intro = 'running';
       this.workspace.innerHTML = `
         <header class="process-heading">
           <a class="process-back" href="/analysis" aria-label="Back to papers"><span aria-hidden="true">&#8592;</span><span>Back</span></a>
@@ -120,6 +127,7 @@
           </div>
         </header>
         <main class="process-stage" data-role="stage" aria-label="Animated paper analysis stage">
+          <div class="process-orbit-layer" data-role="orbit-layer">
           <svg class="process-flow-map" viewBox="0 0 1000 600" preserveAspectRatio="none" aria-hidden="true">
             <path id="module-edge-0" class="process-flow-link" data-edge="0" d="M150 150 C110 205 78 230 82 292"/>
             <path id="module-edge-1" class="process-flow-link" data-edge="1" d="M82 308 C78 365 110 395 155 444"/>
@@ -130,6 +138,8 @@
             <path id="module-edge-6" class="process-flow-link" data-edge="6" d="M842 432 C895 390 928 350 918 308"/>
             <path id="module-edge-7" class="process-flow-link" data-edge="7" d="M916 290 C922 228 890 190 852 150"/>
           </svg>
+          <div class="process-module-flow" data-role="modules" role="group" aria-label="Analysis modules"></div>
+          </div>
           <article class="process-document" aria-label="Illustrated research paper">
             <div class="process-document-top"><span class="process-doc-seal">R</span><span>RESEARCH ARTICLE <i>·</i> FULL TEXT</span><span class="process-doc-page">01</span></div>
             <p class="process-doc-demo-note" data-role="document-demo-note" hidden>Illustrative structure · not extracted</p>
@@ -156,11 +166,10 @@
             </svg>
             <span class="process-drone-particles" aria-hidden="true"><i>x</i><i>+</i><i>0</i><i>1</i></span>
           </div>
-          <div class="process-module-flow" data-role="modules" role="group" aria-label="Analysis modules"></div>
           <div class="process-handoff-orb" data-role="handoff-orb" aria-hidden="true"></div>
           <p class="process-stage-caption" data-role="module-detail" aria-live="polite">Preparing the analysis workspace.</p>
         </main>
-        <details class="process-console" open data-role="console">
+        <details class="process-console" data-role="console">
           <summary><span class="process-console-heading"><i class="process-console-indicator" aria-hidden="true"></i>Activity</span><span class="process-console-meta" data-role="console-meta">Observed backend status</span><button type="button" class="process-console-copy" data-action="copy">Copy log</button></summary>
           <div class="process-console-log" data-role="logs" role="log" aria-live="polite" aria-relevant="additions text"></div>
           <p class="process-console-status" data-role="connection" data-state="online">Connected | showing status transitions observed by this page.</p>
@@ -169,6 +178,7 @@
       this.root.prepend(this.workspace);
       document.getElementById('draftModal')?.setAttribute('aria-hidden', 'false');
       this.refs = {
+        orbitLayer: this.workspace.querySelector('[data-role="orbit-layer"]'),
         paperTitle: this.workspace.querySelector('[data-role="paper-title"]'),
         documentTitle: this.workspace.querySelector('[data-role="document-title"]'),
         documentDemoNote: this.workspace.querySelector('[data-role="document-demo-note"]'),
@@ -203,9 +213,109 @@
       this.render();
     }
 
+    cancelIntroAnimations() {
+      this.introCancelled = true;
+      this.introAnimations.forEach(animation => animation.cancel());
+      this.introAnimations = [];
+    }
+
+    async playIntro() {
+      const workspace = this.workspace;
+      const orbit = this.refs?.orbitLayer;
+      if (!workspace || !orbit) return;
+      if (matchMedia('(prefers-reduced-motion: reduce)').matches || matchMedia('(max-width: 760px)').matches) {
+        workspace.dataset.intro = 'ready';
+        this.render();
+        return;
+      }
+      const nodes = [...this.refs.modules.querySelectorAll('.process-module')];
+      const paths = [...orbit.querySelectorAll('.process-flow-link')];
+      const identity = 'perspective(1400px) rotateX(0deg) rotateY(0deg) scale(1)';
+      const clustered = 'perspective(1400px) rotateX(8deg) rotateY(-4deg) scale(.018)';
+      const expanded = 'perspective(1400px) rotateX(8deg) rotateY(-4deg) scale(.78)';
+      this.introCancelled = false;
+      orbit.style.transform = clustered;
+      orbit.style.opacity = '.72';
+      paths.forEach(path => {
+        path.style.opacity = '0';
+        path.style.strokeDasharray = '';
+        path.style.strokeDashoffset = '';
+      });
+
+      const playPhase = async (animations, onFinish) => {
+        this.introAnimations = animations;
+        await Promise.all(animations.map(animation => animation.finished.catch(() => undefined)));
+        if (this.workspace !== workspace || this.introCancelled) return false;
+        onFinish?.();
+        animations.forEach(animation => animation.cancel());
+        this.introAnimations = [];
+        return true;
+      };
+
+      // 1. Start with the cards clustered on the paper, then fan them outward.
+      const fanOut = [orbit.animate([
+        { transform: clustered, opacity: .72 },
+        { transform: expanded, opacity: 1 },
+      ], { duration: 1050, easing: 'cubic-bezier(.16,.82,.22,1)', fill: 'both' })];
+      nodes.forEach((node, index) => fanOut.push(node.animate([
+        { scale: .3, opacity: 0 },
+        { scale: 1, opacity: 1 },
+      ], { duration: 560, delay: 180 + index * 70, easing: 'cubic-bezier(.18,.82,.22,1)', fill: 'both' })));
+      if (!await playPhase(fanOut, () => {
+        orbit.style.transform = expanded;
+        orbit.style.opacity = '1';
+        nodes.forEach(node => {
+          node.style.scale = '1';
+          node.style.opacity = '';
+        });
+      })) return;
+
+      // 2. Draw the existing connector chain one edge at a time to thread each node.
+      const thread = paths.map((path, index) => {
+        const length = path.getTotalLength();
+        path.style.stroke = '#a8cdb8';
+        path.style.strokeDasharray = String(length);
+        path.style.strokeDashoffset = String(length);
+        return path.animate([
+          { strokeDashoffset: length, opacity: 0 },
+          { strokeDashoffset: 0, opacity: .86 },
+        ], { duration: 430, delay: index * 365, easing: 'cubic-bezier(.22,.72,.25,1)', fill: 'both' });
+      });
+      if (!await playPhase(thread, () => {
+        paths.forEach(path => {
+          path.style.strokeDasharray = '';
+          path.style.strokeDashoffset = '';
+          path.style.stroke = '';
+          path.style.opacity = '';
+        });
+      })) return;
+
+      // 3. Settle the connected constellation into its final, undistorted layout.
+      const settle = orbit.animate([
+        { transform: expanded, opacity: 1 },
+        { transform: identity, opacity: 1 },
+      ], { duration: 880, easing: 'cubic-bezier(.2,.78,.22,1)', fill: 'both' });
+      if (!await playPhase([settle], () => {
+        orbit.style.transform = '';
+        orbit.style.opacity = '';
+      })) return;
+
+      if (this.workspace !== workspace || this.introCancelled) return;
+      paths.forEach(path => {
+        path.style.strokeDasharray = '';
+        path.style.strokeDashoffset = '';
+        path.style.stroke = '';
+        path.style.opacity = '';
+      });
+      this.introAnimations = [];
+      workspace.dataset.intro = 'ready';
+      this.render();
+    }
+
     restorePdf() {
       this.handoffAnimation?.cancel();
       this.droneAnimation?.cancel();
+      this.cancelIntroAnimations();
       window.removeEventListener('resize', this.resizeHandler);
       document.body.classList.remove('processing-experience-active');
     }
@@ -287,10 +397,11 @@
         : this.status === 'FAILED' ? this.paper.analysis_error || 'The backend reported a failure.'
         : this.status === 'PENDING' ? 'Queued · waiting for the analysis worker.'
         : activeModule?.detail || this.statusMessage();
-      this.refs.drone.dataset.idle = String(this.status !== 'PROCESSING');
+      const introRunning = this.workspace.dataset.intro === 'running';
+      this.refs.drone.dataset.idle = String(introRunning || this.status !== 'PROCESSING');
       if (!this.droneAnimation) {
-        this.refs.drone.dataset.beamTarget = this.status !== 'PROCESSING' ? 'off' : this.stage === 'fulltext_mapping' ? 'paper' : 'module';
-        this.refs.drone.style.setProperty('--drone-beam-alpha', this.status === 'PROCESSING' ? '1' : '0');
+        this.refs.drone.dataset.beamTarget = introRunning || this.status !== 'PROCESSING' || this.stage === 'starting' ? 'off' : this.stage === 'fulltext_mapping' ? 'paper' : 'module';
+        this.refs.drone.style.setProperty('--drone-beam-alpha', !introRunning && this.status === 'PROCESSING' ? '1' : '0');
       }
       this.refs.connection.dataset.state = this.demo ? 'demo' : this.connection === 'connected' ? 'online' : 'offline';
       this.refs.connection.textContent = this.demo
@@ -398,7 +509,7 @@
     }
 
     syncDroneToModule(moduleId) {
-      if (this.stage === 'fulltext_mapping') moduleId = null;
+      if (['starting','fulltext_mapping'].includes(this.stage)) moduleId = null;
       const node = moduleId && this.refs.modules.querySelector(`[data-module="${moduleId}"]`);
       const stageRect = this.refs.stage.getBoundingClientRect();
       const rect = node?.getBoundingClientRect();
