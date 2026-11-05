@@ -9,6 +9,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="{{ url_for('static', path='build/argument-graphs.css') }}">
+  <script src="{{ url_for('static', path='js/analysis-processing.js') }}"></script>
   <style>
     body{font-family:Inter,system-ui,sans-serif}.draft-value{white-space:pre-wrap;line-height:1.65}
     #paperBlueprintContent{min-width:0;max-width:100%;overflow-wrap:anywhere}
@@ -58,13 +59,9 @@
     .aif-history{flex:0 0 auto}
     .atomic-workspace{display:grid;grid-template-columns:minmax(150px,.72fr) minmax(0,1.28fr);gap:12px;min-width:0}
     .atomic-workspace>*{min-width:0}
+    .stance-engagement-workspace{display:block;min-width:0}
     .atomic-section-list{overflow-wrap:anywhere;word-break:break-word}
     @media(max-width:760px){.atomic-workspace{grid-template-columns:minmax(0,1fr)}}
-    .atomic-focus-mode #queueAllBtn,.atomic-focus-mode .analysis-cross-paper,.atomic-focus-mode [data-full-analysis-control]{display:none!important}
-    .atomic-focus-mode #draftTabAnalysis,.atomic-focus-mode #draftTabImrad,.atomic-focus-mode #draftTabBlueprint,.atomic-focus-mode #draftTabToulmin,.atomic-focus-mode #draftTabCraft,.atomic-focus-mode #draftTabAif,.atomic-focus-mode #draftTabScientificTypes,.atomic-focus-mode #draftTabSaffron,.atomic-focus-mode #draftTabPropositions,.atomic-focus-mode #draftTabMvp3{display:none!important}
-    .atomic-focus-mode #draftAnalysisView,.atomic-focus-mode #draftImradView,.atomic-focus-mode #draftBlueprintView,.atomic-focus-mode #draftCraftView,.atomic-focus-mode #draftScientificTypesView,.atomic-focus-mode #draftSaffronView,.atomic-focus-mode #draftPropositionView,.atomic-focus-mode #draftArgumentGraphView,.atomic-focus-mode #draftMvp3View{display:none!important}
-    .atomic-focus-mode #draftAtomicSentencesView>header,.atomic-focus-mode #draftAtomicSentencesView>section[aria-labelledby="atomicPaperContextHeading"],.atomic-focus-mode .atomic-workspace>nav,.atomic-focus-mode #atomicCandidateHeading,.atomic-focus-mode #atomicCandidateHeading+p,.atomic-focus-mode #atomicStanceProvenance{display:none!important}
-    .atomic-focus-mode .atomic-workspace{display:block}.atomic-focus-mode #atomicExtractionStatus.hidden{display:none!important}
     .analysis-running{position:relative;overflow:hidden;border-color:#bfdbfe}
     .analysis-running::before{content:"";position:absolute;inset:0 auto auto 0;width:30%;height:2px;background:#2563eb;transform:translateX(-110%);animation:analysis-sweep 2.2s cubic-bezier(.22,.75,.25,1) infinite}
     .analysis-live-dot{width:7px;height:7px;flex:0 0 7px;border-radius:50%;background:#2563eb;box-shadow:0 0 0 3px #dbeafe;animation:analysis-pulse 1.6s ease-in-out infinite}
@@ -95,8 +92,9 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="{{ url_for('static', path='css/product-ui.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', path='css/analysis-processing.css') }}">
 </head>
-<body data-page="analysis" class="{% if atomic_focus_mode|default(false) %}atomic-focus-mode {% endif %}flex h-screen min-h-screen flex-col overflow-hidden bg-slate-50 text-slate-800 md:flex-row{% if paper_detail_mode %} paper-detail-route{% endif %}" data-paper-id="{{ paper_id|default('') }}">
+<body data-page="analysis" class="flex h-screen min-h-screen flex-col overflow-hidden bg-slate-50 text-slate-800 md:flex-row{% if paper_detail_mode %} paper-detail-route{% endif %}" data-paper-id="{{ paper_id|default('') }}">
   {% set sidebar_active_tab = 'analysis' %}
 {% set sidebar_workspace_mode = false %}
 {% set sidebar_show_utilities = false %}
@@ -106,14 +104,14 @@
       <button type="button" onclick="toggleMobileSidebar()" aria-label="Open navigation" aria-controls="sidebar" aria-expanded="false" data-sidebar-toggle class="mr-3 rounded-xl p-2 text-slate-600 hover:bg-slate-100 md:hidden">
         <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
       </button>
-      <div class="flex min-w-0 items-center gap-2 text-xs font-medium text-slate-500"><span>System</span><span class="text-slate-300">/</span><span class="font-bold text-slate-800">AI Analysis</span></div>
+      <div class="flex min-w-0 flex-1 flex-wrap items-center gap-2 text-xs font-medium text-slate-500"><span>System</span><span class="text-slate-300">/</span><span class="font-bold text-slate-800">AI Analysis</span></div>
     </header>
 
   <main class="mx-auto w-full max-w-7xl px-4 py-7 sm:px-6 sm:py-10">
     <section class="analysis-page-heading mb-6 flex flex-col justify-between gap-5 sm:flex-row sm:items-center">
       <div class="max-w-2xl">
         <h1 class="text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">Paper Analysis</h1>
-        <p class="mt-2 text-sm leading-6 text-slate-500">{% if atomic_focus_mode %}Open a downloaded paper to run only the Atomic Stance &amp; Engagement analysis. GROBID prepares its full text when needed.{% else %}Select a downloaded paper to extract its full text, generate an AI analysis draft, and review the results here.{% endif %}</p>
+        <p class="mt-2 text-sm leading-6 text-slate-500">Select a downloaded paper to extract its full text, generate an AI analysis draft, and review all analysis modules here.</p>
       </div>
       <div class="flex flex-col gap-2 sm:min-w-72">
         <label for="provider" class="text-xs font-semibold text-slate-600">AI model</label>
@@ -129,8 +127,15 @@
       <div><h2 class="text-lg font-bold text-slate-900">Papers</h2><p id="listSummary" class="mt-1 text-sm text-slate-500">Loading papers...</p></div>
       <div class="flex flex-wrap gap-2">
         <button id="refreshBtn" class="rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50">Refresh</button>
+        <button id="demoPreviewBtn" class="rounded-xl border border-blue-200 bg-blue-50 px-4 py-2.5 text-sm font-semibold text-blue-700 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50">Preview processing demo</button>
+        <button id="demoLockToggle" type="button" class="rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm font-semibold text-amber-800 hover:bg-amber-100">Demo lock: On</button>
         <button id="queueAllBtn" class="rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50">Analyze all</button>
       </div>
+    </section>
+
+    <section id="demoLockBanner" class="mb-4 flex flex-col justify-between gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950 sm:flex-row sm:items-center" role="status">
+      <div><strong>Demo lock is on.</strong> Real paper analysis, SAFFRON retry, and cross-paper analysis are disabled. The preview uses a local stage simulation and creates no job or saved result.</div>
+      <button type="button" class="shrink-0 font-semibold text-amber-900 underline underline-offset-2" data-action="disable-demo-lock">Enable real analysis</button>
     </section>
 
     <div id="notice" class="mb-4 hidden rounded-xl border px-4 py-3 text-sm" role="status"></div>
@@ -174,7 +179,7 @@
         <button id="draftTabSaffron" role="tab" aria-selected="false" aria-controls="draftSaffronView" class="rounded-t-md border-b-2 border-transparent px-3 py-2 text-sm font-semibold text-slate-500 hover:text-slate-800">Terms &amp; Taxonomy</button>
         <button id="draftTabPropositions" role="tab" aria-selected="false" aria-controls="draftPropositionView" class="rounded-t-md border-b-2 border-transparent px-3 py-2 text-sm font-semibold text-slate-500 hover:text-slate-800">Sources</button>
         <button id="draftTabMvp3" role="tab" aria-selected="false" aria-controls="draftMvp3View" class="rounded-t-md border-b-2 border-transparent px-3 py-2 text-sm font-semibold text-slate-500 hover:text-slate-800">Citation &amp; Rubric</button>
-        <button id="draftTabAtomic" type="button" role="tab" aria-selected="false" aria-controls="draftAtomicSentencesView" tabindex="-1" class="rounded-t-md border-b-2 border-transparent px-3 py-2 text-sm font-semibold text-slate-500 hover:text-slate-800">Atomic Sentences</button>
+        <button id="draftTabStanceEngagement" type="button" role="tab" aria-selected="false" aria-controls="draftStanceEngagementView" tabindex="-1" class="rounded-t-md border-b-2 border-transparent px-3 py-2 text-sm font-semibold text-slate-500 hover:text-slate-800">Stance &amp; Engagement</button>
       </div>
       <div id="draftViewArea">
       <div id="draftAnalysisView" role="tabpanel" aria-labelledby="draftTabAnalysis" class="draft-panel analysis-view-panel"><div id="draftContent"></div></div>
@@ -187,28 +192,15 @@
         <div id="mvp3Status" class="mb-3 text-xs text-slate-500" aria-live="polite"></div>
         <div id="mvp3ArgumentList" class="space-y-4"></div>
       </div>
-      <div id="draftAtomicSentencesView" role="tabpanel" aria-labelledby="draftTabAtomic" tabindex="0" class="draft-panel analysis-view-panel hidden overflow-y-auto px-5 py-4 sm:px-7">
+      <div id="draftStanceEngagementView" role="tabpanel" aria-labelledby="draftTabStanceEngagement" tabindex="0" class="draft-panel analysis-view-panel hidden overflow-y-auto px-5 py-4 sm:px-7">
         <header class="mb-4">
-          <h3 class="text-lg font-semibold text-slate-900">Atomic Sentences</h3>
-          <p class="mt-1 text-sm leading-6 text-slate-600">Generate Atomic Sentence candidates and analyze their stance and engagement using Ken Hyland’s contextual model.</p>
+          <h3 class="text-lg font-semibold text-slate-900">Stance &amp; Engagement</h3>
+          <p class="mt-1 text-sm leading-6 text-slate-600">AI analyzes this paper's source text, validates each marker against its PDF location, and calculates the counts and rates shown below.</p>
         </header>
-        <section class="mb-4 rounded-lg border border-slate-200 bg-white p-3" aria-labelledby="atomicPaperContextHeading">
-          <h4 id="atomicPaperContextHeading" class="text-xs font-semibold uppercase tracking-wide text-slate-500">Paper context</h4>
-          <p id="atomicPaperTitle" class="mt-1 break-words text-sm font-semibold text-slate-900">Paper metadata will appear when available.</p>
-          <p id="atomicPaperIdentifier" class="mt-1 break-all text-xs text-slate-600">Paper identifier unavailable.</p>
-        </section>
-        <div class="atomic-workspace">
-          <nav class="rounded-lg border border-slate-200 bg-white p-3" aria-label="Atomic Sentence paper sections">
-            <h4 class="text-sm font-semibold text-slate-800">Paper navigation</h4>
-            <p id="atomicSectionStatus" class="mt-2 text-xs leading-5 text-slate-500" role="status" aria-live="polite">Loading available paper sections…</p>
-            <ol id="atomicSectionList" class="atomic-section-list mt-2 space-y-2 text-sm text-slate-700"></ol>
-            <p id="atomicNavigationStatus" class="mt-2 min-h-5 text-xs leading-5 text-slate-600" role="status" aria-live="polite"></p>
-          </nav>
-          <section class="rounded-lg border border-slate-200 bg-white p-3" aria-labelledby="atomicCandidateHeading">
-            {% if atomic_focus_mode %}
+        <div class="stance-engagement-workspace">
+          <section class="rounded-lg border border-slate-200 bg-white p-3" aria-labelledby="stanceEngagementHeading">
             <div class="flex flex-wrap items-start justify-between gap-2">
-              <div><h4 id="atomicCandidateHeading" class="text-sm font-semibold text-slate-800">Stance &amp; Engagement</h4><p class="mt-1 text-xs text-slate-500">Source-traced counts based on Hyland categories.</p></div>
-              <button id="atomicExtractButton" type="button" disabled aria-disabled="true" aria-describedby="atomicExtractionStatus" class="shrink-0 rounded-md bg-blue-600 px-3 py-2 text-xs font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300">Analyze paper</button>
+              <div><h4 id="stanceEngagementHeading" class="text-sm font-semibold text-slate-800">Analysis of this paper</h4><p class="mt-1 text-xs text-slate-500">Source-traced counts based on Hyland categories; review automated classifications.</p></div>
             </div>
             <p id="atomicExtractionStatus" class="hidden mt-3 rounded-md border border-slate-200 bg-slate-50 p-3 text-xs leading-5 text-slate-700" role="status" aria-live="polite"></p>
             <p id="atomicStanceProvenance" class="mt-2 text-[11px] leading-5 text-slate-500"></p>
@@ -218,14 +210,6 @@
               <p id="atomicEvidenceEmpty" class="mt-1 text-xs leading-5 text-slate-600">Run the analysis to inspect the source evidence for each category.</p>
               <div id="atomicStanceTrace" class="mt-2 space-y-2"></div>
             </div>
-            {% else %}
-            <div class="flex flex-wrap items-start justify-between gap-2">
-              <div><h4 id="atomicCandidateHeading" class="text-sm font-semibold text-slate-800">Atomic Sentence analysis</h4><p class="mt-1 text-xs text-slate-500">AI results are source-linked candidates and require human review.</p></div>
-              <button id="atomicExtractButton" type="button" aria-describedby="atomicExtractionStatus" class="shrink-0 rounded-md border border-indigo-700 bg-indigo-700 px-3 py-2 text-xs font-semibold text-white hover:bg-indigo-800">Run Atomic analysis</button>
-            </div>
-            <p id="atomicExtractionStatus" class="mt-3 rounded-md border border-slate-200 bg-slate-50 p-3 text-xs leading-5 text-slate-700" role="status" aria-live="polite">Results use the saved source and remain unverified.</p>
-            <div id="atomicResults" class="mt-4 space-y-6"></div>
-            {% endif %}
           </section>
         </div>
       </div>
@@ -451,9 +435,6 @@ function renderCraftArguments(){
   activate(selectedIndex);
 }</script>
 <script src="/static/js/atomic-section-navigation.js"></script>
-{% if not atomic_focus_mode %}
-<script src="/static/js/atomic-analysis.js"></script>
-{% endif %}
 <script>
 const fields = [
   ['summary','Summary'], ['objective','Research objective'], ['methodology','Methodology'],
@@ -463,11 +444,29 @@ const fields = [
 ];
 const labels = {NOT_STARTED:'Not analyzed',PENDING:'Queued',PROCESSING:'Analyzing',DONE:'Draft available',FAILED:'Analysis failed'};
 const classes = {NOT_STARTED:'bg-slate-100 text-slate-600',PENDING:'bg-amber-50 text-amber-700',PROCESSING:'bg-blue-50 text-blue-700',DONE:'bg-emerald-50 text-emerald-700',FAILED:'bg-rose-50 text-rose-700'};
-const stageLabels = {starting:'Starting analysis',document_extraction:'Extracting paper text',fulltext_mapping:'Checking saved full-text mapping',fulltext_mapping_created:'Saved GROBID full-text checkpoint',fulltext_mapping_reused:'Reusing saved GROBID full-text checkpoint',review_draft:'Reading all mapped text',proposition_extraction:'Extracting propositions',argument_role_analysis:'Mapping claims and evidence',warrant_reconstruction:'Examining reasoning',graph_validation:'Validating argument graph',paper_profile:'Extracting keywords, outline and writing style',completed:'Analysis complete'};
+const stageLabels = {starting:'Starting analysis',document_extraction:'Extracting PDF pages to Markdown via Ollama API',fulltext_mapping:'Checking saved full-text mapping',fulltext_mapping_created:'Saved Ollama/GROBID full-text checkpoint',fulltext_mapping_reused:'Reusing saved full-text checkpoint',review_draft:'Reading all mapped text',proposition_extraction:'Extracting propositions',argument_role_analysis:'Mapping claims and evidence',warrant_reconstruction:'Examining reasoning',graph_validation:'Validating argument graph',paper_profile:'Extracting keywords, outline and writing style',stance_engagement:'Analyzing Stance & Engagement',completed:'Analysis complete'};
 const listEl = document.getElementById('paperList');
 const noticeEl = document.getElementById('notice');
 let currentPapers = [];
 let config = {};
+let analysisDemoLocked=(()=>{try{return sessionStorage.getItem('paperFetcherAnalysisDemoLock')!=='off'}catch{return true}})();
+
+function refreshDemoLockUi(){
+  document.getElementById('demoLockBanner').classList.toggle('hidden',!analysisDemoLocked);
+  const toggle=document.getElementById('demoLockToggle');
+  toggle.textContent=analysisDemoLocked?'Demo lock: On':'Demo lock: Off';
+  toggle.className='rounded-xl border px-4 py-2.5 text-sm font-semibold '+(analysisDemoLocked?'border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100':'border-slate-300 bg-white text-slate-700 hover:bg-slate-50');
+  document.getElementById('crossPaperBtn').disabled=analysisDemoLocked;
+  document.getElementById('crossPaperBtn').title=analysisDemoLocked?'Disabled while demo lock is on.':'';
+  document.getElementById('saffronRetryButton').disabled=analysisDemoLocked;
+  document.getElementById('saffronRetryButton').title=analysisDemoLocked?'Disabled while demo lock is on.':'';
+}
+function setAnalysisDemoLock(locked){
+  analysisDemoLocked=Boolean(locked);
+  try{sessionStorage.setItem('paperFetcherAnalysisDemoLock',analysisDemoLocked?'on':'off')}catch{}
+  refreshDemoLockUi();
+  render();
+}
 
 function notice(message, error=false) {
   noticeEl.textContent = message;
@@ -493,7 +492,10 @@ function render() {
   listEl.replaceChildren();
   const ready = currentPapers.filter(p=>!['PENDING','PROCESSING','DONE'].includes(p.analysis_status)).length;
   document.getElementById('listSummary').textContent = `${currentPapers.length} papers with valid PDFs · ${currentPapers.filter(p=>p.analysis_status==='DONE').length} saved drafts`;
-  document.getElementById('queueAllBtn').disabled = ready === 0;
+  document.getElementById('queueAllBtn').disabled = analysisDemoLocked ? currentPapers.length === 0 : ready === 0;
+  document.getElementById('queueAllBtn').textContent = analysisDemoLocked ? 'Preview analysis demo' : 'Analyze all';
+  document.getElementById('demoPreviewBtn').disabled = currentPapers.length === 0;
+  refreshDemoLockUi();
   if (!currentPapers.length) {
     const empty=document.createElement('div'); empty.className='rounded-2xl border border-dashed border-slate-300 bg-white px-5 py-12 text-center';
     const title=document.createElement('p'); title.className='font-semibold text-slate-700'; title.textContent='No valid PDFs are available in the library.';
@@ -511,18 +513,15 @@ function render() {
     if(paper.analysis_model){const model=document.createElement('span');model.className='text-xs text-slate-500';model.textContent=`${paper.analysis_provider} · ${paper.analysis_model}`;badges.append(model)}
     if(paper.analysis_error){const error=document.createElement('p');error.className='mt-2 break-words text-xs text-rose-600';error.textContent=paper.analysis_error;info.append(title,doi,filename,badges,error)}else info.append(title,doi,filename,badges);
     const actions=document.createElement('div'); actions.className='flex shrink-0 flex-wrap gap-2';
-    const atomicOnly=document.createElement('button');atomicOnly.className='atomic-only-open rounded-xl border border-indigo-200 bg-indigo-50 px-3.5 py-2 text-sm font-semibold text-indigo-700 hover:bg-indigo-100';atomicOnly.textContent='Open Atomic';atomicOnly.addEventListener('click',()=>navigatePaper(paper));actions.append(atomicOnly);
     if(paper.analysis_status==='DONE'){
       const view=document.createElement('button');view.className='rounded-xl border border-blue-200 bg-blue-50 px-3.5 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-100';view.textContent='Xem draft';view.addEventListener('click',()=>navigatePaper(paper));actions.append(view);
-      const rerun=document.createElement('button');rerun.className='rounded-xl border border-slate-300 px-3.5 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50';rerun.textContent='Reanalyze';rerun.addEventListener('click',()=>enqueue([paper.doi]));actions.append(rerun);
+      const rerun=document.createElement('button');rerun.className='rounded-xl border border-slate-300 px-3.5 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50';rerun.textContent=analysisDemoLocked?'Preview demo':'Reanalyze';rerun.addEventListener('click',()=>analysisDemoLocked?navigateDemoPaper(paper):enqueue([paper.doi]));actions.append(rerun);
     } else if(['PENDING','PROCESSING'].includes(paper.analysis_status)) {
-      const waiting=document.createElement('button');waiting.disabled=true;waiting.className='inline-flex items-center gap-2 cursor-wait rounded-xl bg-slate-100 px-3.5 py-2 text-sm font-semibold text-slate-500';
-      if(paper.analysis_status==='PROCESSING'){const spinner=document.createElement('span');spinner.className='analysis-spinner';spinner.setAttribute('aria-hidden','true');waiting.append(spinner);waiting.append(document.createTextNode('Analyzing…'))}
-      else waiting.textContent='Queued';actions.append(waiting);
+      const progress=document.createElement('button');progress.className='rounded-xl border border-blue-200 bg-blue-50 px-3.5 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-100';progress.textContent=analysisDemoLocked?'Preview demo':paper.analysis_status==='PROCESSING'?'View progress':'View queue status';progress.addEventListener('click',()=>analysisDemoLocked?navigateDemoPaper(paper):navigatePaper(paper));actions.append(progress);
     } else {
-      const start=document.createElement('button');start.className='rounded-xl bg-blue-600 px-3.5 py-2 text-sm font-semibold text-white hover:bg-blue-700';start.textContent=paper.analysis_status==='FAILED'?'Retry':'Add to queue';start.addEventListener('click',()=>enqueue([paper.doi]));actions.append(start);
+      const start=document.createElement('button');start.className='rounded-xl bg-blue-600 px-3.5 py-2 text-sm font-semibold text-white hover:bg-blue-700';start.textContent=analysisDemoLocked?'Preview demo':paper.analysis_status==='FAILED'?'Retry':'Add to queue';start.addEventListener('click',()=>analysisDemoLocked?navigateDemoPaper(paper):enqueue([paper.doi]));actions.append(start);
+      if(paper.analysis_status==='FAILED'){const view=document.createElement('button');view.className='rounded-xl border border-slate-300 px-3.5 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50';view.textContent='View failure';view.addEventListener('click',()=>navigatePaper(paper));actions.append(view)}
     }
-    for(const control of actions.querySelectorAll('button:not(.atomic-only-open)'))control.dataset.fullAnalysisControl='true';
     card.append(info,actions); listEl.append(card);
   }
 }
@@ -531,18 +530,28 @@ async function loadPapers() {
   catch(err){notice(err.message,true)}
 }
 async function enqueue(dois=[]) {
+  if(analysisDemoLocked){const paper=dois.length?currentPapers.find(item=>item.doi===dois[0]):currentPapers.find(item=>!['PENDING','PROCESSING','DONE'].includes(item.analysis_status))||currentPapers[0];if(paper)navigateDemoPaper(paper);else notice('No paper source is available for the demo preview.',true);return}
   const button=document.getElementById('queueAllBtn');button.disabled=true;
   try {const res=await fetch('/api/analysis/enqueue',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({dois,provider:document.getElementById('provider').value})});const result=await res.json();if(!res.ok)throw new Error(result.error||'Could not create the queue.');notice(`Added ${result.total} papers to the queue${result.skipped?.length?`; skipped ${result.skipped.length} already have a draft or are processing`:''}.`);await loadPapers()}
   catch(err){notice(err.message,true)}finally{button.disabled=false}
 }
 document.getElementById('queueAllBtn').addEventListener('click',()=>enqueue([]));
+document.getElementById('demoPreviewBtn').addEventListener('click',()=>{const paper=currentPapers.find(item=>!['PENDING','PROCESSING','DONE'].includes(item.analysis_status))||currentPapers[0];if(paper)navigateDemoPaper(paper)});
+document.getElementById('demoLockToggle').addEventListener('click',()=>setAnalysisDemoLock(!analysisDemoLocked));
+document.querySelector('[data-action="disable-demo-lock"]').addEventListener('click',()=>setAnalysisDemoLock(false));
 document.getElementById('refreshBtn').addEventListener('click',loadPapers);
 document.getElementById('provider').addEventListener('change',providerHint);
 let argumentationData=null,currentDoi='',currentPaper=null;
 window.addEventListener('craft-viewport-move',event=>{document.getElementById('craftGraphZoomLevel').textContent=Math.round(event.detail.zoom*100)+'%'});
 const paperDetailMode=document.body.classList.contains('paper-detail-route');
+const demoProcessingPreview=new URLSearchParams(window.location.search).get('demo')==='1';
+const analysisProcessing=new window.AnalysisProcessingExperience();
+analysisProcessing.onStart=paper=>{currentPaper=paper;currentDoi=paper.doi};
+const startPaperProcessing=analysisProcessing.start.bind(analysisProcessing);
+analysisProcessing.start=(paper,options={})=>startPaperProcessing(paper,{...options,demo:demoProcessingPreview||Boolean(options.demo)});
 function paperUrl(doi){return '/analysis/paper/'+encodeURIComponent(doi)+'?from='+encodeURIComponent('/analysis')}
 function navigatePaper(paper){location.href=paperUrl(paper.doi)}
+function navigateDemoPaper(paper){location.href=paperUrl(paper.doi)+'&demo=1'}
 function navigateNeighbor(direction){const index=currentPapers.findIndex(paper=>paper.doi===currentDoi),next=currentPapers[index+direction];if(next)navigatePaper(next)}
 let pdfDocument=null,pdfZoom=1,pdfPages=[],pdfHighlightsOn=true,pdfSelectedId=null;
 let atomicSectionMappings=new Map(),activeAtomicSectionId='',atomicPdfSha256='',atomicPdfHashError='',atomicPdfLoadState='loading',atomicScrollFrame=0,atomicLastVisiblePage=null,atomicProgrammaticScroll=false,atomicProgrammaticSyncTimer=0;
@@ -649,50 +658,26 @@ const aifState={graph:null,mode:'pure',graphScope:'argument',views:{},selectedRa
 function setAifMode(mode){if(!['pure','toulmin'].includes(mode))return;const changed=aifState.mode!==mode;aifState.mode=mode;if(changed){aifState.selectedNodeId=null;closeAifInspector()}if(!aifState.graph)return;renderAifGraph(aifState.graph);requestAnimationFrame(()=>{if(mode==='pure')window.aifGraphControls?.fitView();else window.toulminGraphControls?.fitView()})}
 let draftReturnFocus=null,selectedPropositionId=null,selectedRelationId=null,selectedSectionId=null;
 function textBlock(parent,label,value){const section=document.createElement('section');section.className='border-b border-slate-100 py-3 last:border-0';uiText(section,'h3','text-sm font-semibold text-slate-800',label);uiText(section,'p','draft-value mt-1.5 text-sm text-slate-600',value||'Not stated in the paper');parent.append(section)}
-const analysisTabs=[['analysis','draftTabAnalysis','draftAnalysisView'],['imrad','draftTabImrad','draftImradView'],['blueprint','draftTabBlueprint','draftBlueprintView'],['toulmin','draftTabToulmin','draftArgumentGraphView'],['craft','draftTabCraft','draftCraftView'],['aif','draftTabAif','draftArgumentGraphView'],['scientificTypes','draftTabScientificTypes','draftScientificTypesView'],['saffron','draftTabSaffron','draftSaffronView'],['propositions','draftTabPropositions','draftPropositionView'],['mvp3','draftTabMvp3','draftMvp3View'],['atomic','draftTabAtomic','draftAtomicSentencesView']];
+const analysisTabs=[['analysis','draftTabAnalysis','draftAnalysisView'],['imrad','draftTabImrad','draftImradView'],['blueprint','draftTabBlueprint','draftBlueprintView'],['toulmin','draftTabToulmin','draftArgumentGraphView'],['craft','draftTabCraft','draftCraftView'],['aif','draftTabAif','draftArgumentGraphView'],['scientificTypes','draftTabScientificTypes','draftScientificTypesView'],['saffron','draftTabSaffron','draftSaffronView'],['propositions','draftTabPropositions','draftPropositionView'],['mvp3','draftTabMvp3','draftMvp3View'],['stanceEngagement','draftTabStanceEngagement','draftStanceEngagementView']];
 function renderAtomicPaperContext(paper){
   const paperId=String(paper?.doi||document.body.dataset.paperId||'').trim(),title=String(paper?.title||'').trim();
-  document.getElementById('atomicPaperTitle').textContent=title&&title!==paperId?title:'Paper title unavailable.';
-  document.getElementById('atomicPaperIdentifier').textContent=paperId?(paperId.startsWith('slrwork_')?'Paper ID: ':'DOI: ')+paperId:'Paper identifier unavailable.';
+  const titleNode=document.getElementById('atomicPaperTitle'),identifierNode=document.getElementById('atomicPaperIdentifier');
+  if(titleNode)titleNode.textContent=title&&title!==paperId?title:'Paper title unavailable.';
+  if(identifierNode)identifierNode.textContent=paperId?(paperId.startsWith('slrwork_')?'Paper ID: ':'DOI: ')+paperId:'Paper identifier unavailable.';
 }
-function renderAtomicSections(state='loading'){
-  const list=document.getElementById('atomicSectionList'),status=document.getElementById('atomicSectionStatus'),sections=Array.isArray(argumentationData?.sections)?argumentationData.sections:[];
-  const notice=document.getElementById('atomicNavigationStatus');
-  list.replaceChildren();
-  notice.textContent='';
-  if(!sections.length){
-    atomicSectionMappings=new Map();
-    status.textContent=state==='error'?'Paper section data could not be loaded.':state==='loading'?'Loading available paper sections…':'No structured section data is available for this paper.';
-    return;
-  }
+function renderAtomicSections(){
+  const sections=Array.isArray(argumentationData?.sections)?argumentationData.sections:[];
+  if(!sections.length){atomicSectionMappings=new Map();return}
   const navigation=window.AtomicSectionNavigation;
   atomicSectionMappings=navigation?.buildSectionMappings?navigation.buildSectionMappings({
     sections,pdfPages,propositions:argumentationData?.propositions||[],currentPdfSha256:atomicPdfSha256,
     documentPdfSha256:argumentationData?.document_metadata?.pdf_artifact?.sha256||'',
     validationStatus:argumentationData?.validation?.source_pdf_artifact_status||'verification_unavailable',
   }):new Map(sections.filter(section=>section?.id).map(section=>[String(section.id),{sectionId:String(section.id),status:'unmapped',page:null,quote:'',reason:'source_unverified'}]));
-  const exactCount=[...atomicSectionMappings.values()].filter(mapping=>mapping.status==='exact').length;
-  const pageCount=[...atomicSectionMappings.values()].filter(mapping=>mapping.status==='page-only').length;
-  const unavailableCount=sections.length-exactCount-pageCount;
-  if(state==='loading'||atomicPdfLoadState==='loading')status.textContent=state==='error'?'Paper section data could not be loaded.':'Loading the current PDF to verify section locations…';
-  else if(atomicPdfLoadState==='not_pdf')status.textContent='This paper has a Markdown source; PDF page navigation is unavailable.';
-  else if(atomicPdfLoadState==='error')status.textContent='The PDF viewer could not load, so section navigation is unavailable.';
-  else if(unavailableCount===sections.length&&[...atomicSectionMappings.values()].some(mapping=>mapping.reason==='pdf_mismatch'))status.textContent='Section locations are unavailable because this PDF does not match the validated source mapping.';
-  else if(unavailableCount===sections.length&&[...atomicSectionMappings.values()].some(mapping=>mapping.reason==='pdf_hash_unavailable'))status.textContent='Section locations are unavailable because the current PDF could not be fingerprinted.';
-  else if(!navigation?.buildSectionMappings)status.textContent='Section navigation is unavailable; the existing PDF viewer remains available.';
-  else status.textContent=sections.length+' section'+(sections.length===1?'':'s')+' · '+exactCount+' exact, '+pageCount+' page-only, '+unavailableCount+' unavailable.';
-  for(const section of sections){
-    const item=document.createElement('li'),button=document.createElement('button'),id=String(section?.id||''),heading=String(section?.heading||section?.section_type||'').trim(),mapping=atomicSectionMappings.get(id),active=id===activeAtomicSectionId;
-    button.type='button';button.dataset.atomicSectionId=id;button.setAttribute('aria-pressed',String(active));button.className=active?'w-full rounded-md border border-blue-300 bg-blue-50 p-2 text-left text-blue-900':'w-full rounded-md border border-transparent p-2 text-left text-slate-700 hover:border-slate-200 hover:bg-slate-50';
-    uiText(button,'span','block font-medium',heading||'Section heading unavailable.');
-    const location=mapping?.status==='exact'?'Exact text position · Page '+mapping.page:mapping?.status==='page-only'?'Page-only location · Page '+mapping.page:state==='loading'||atomicPdfLoadState==='loading'?'Checking PDF location…':atomicSectionReason(mapping?.reason);
-    const locationLabel=uiText(button,'span','mt-1 block text-[11px] text-slate-500',location);locationLabel.dataset.atomicLocation='true';button.addEventListener('click',()=>navigateToAtomicSection(id));item.append(button);list.append(item);
-  }
-  if(state==='error')notice.textContent='Section data could not be loaded. The existing PDF viewer remains available.';
-  atomicLastVisiblePage=null;scheduleAtomicPageSync();
+  atomicLastVisiblePage=null;
 }
 function atomicSectionReason(reason){return({pdf_unavailable:'PDF unavailable',pdf_hash_unavailable:'PDF fingerprint unavailable',pdf_mismatch:'PDF/source hash mismatch',source_unverified:'Source mapping not verified',invalid_page:'Invalid page mapping',ambiguous_section_text:'Ambiguous PDF location',multiple_verified_pages:'Section spans multiple mapped pages',no_validated_location:'No validated PDF location'})[reason]||'Location unavailable'}
-function downgradeAtomicSectionPosition(sectionId,mapping){mapping.status='page-only';mapping.quote='';mapping.reason='text_layer_position_unavailable';const button=[...document.querySelectorAll('#atomicSectionList [data-atomic-section-id]')].find(item=>item.dataset.atomicSectionId===String(sectionId));const label=button?.querySelector('[data-atomic-location]');if(label)label.textContent='Page-only location · Page '+mapping.page;const values=[...atomicSectionMappings.values()],exact=values.filter(item=>item.status==='exact').length,pageOnly=values.filter(item=>item.status==='page-only').length;document.getElementById('atomicSectionStatus').textContent=values.length+' section'+(values.length===1?'':'s')+' · '+exact+' exact, '+pageOnly+' page-only, '+(values.length-exact-pageOnly)+' unavailable.'}
+function downgradeAtomicSectionPosition(sectionId,mapping){mapping.status='page-only';mapping.quote='';mapping.reason='text_layer_position_unavailable';const button=[...document.querySelectorAll('#atomicSectionList [data-atomic-section-id]')].find(item=>item.dataset.atomicSectionId===String(sectionId));const label=button?.querySelector('[data-atomic-location]');if(label)label.textContent='Page-only location · Page '+mapping.page;const status=document.getElementById('atomicSectionStatus');if(status){const values=[...atomicSectionMappings.values()],exact=values.filter(item=>item.status==='exact').length,pageOnly=values.filter(item=>item.status==='page-only').length;status.textContent=values.length+' section'+(values.length===1?'':'s')+' · '+exact+' exact, '+pageOnly+' page-only, '+(values.length-exact-pageOnly)+' unavailable.'}}
 function setActiveAtomicSection(sectionId){if(activeAtomicSectionId===sectionId)return;activeAtomicSectionId=sectionId;document.querySelectorAll('#atomicSectionList [data-atomic-section-id]').forEach(button=>{const active=button.dataset.atomicSectionId===sectionId;button.setAttribute('aria-pressed',String(active));button.classList.toggle('border-blue-300',active);button.classList.toggle('bg-blue-50',active);button.classList.toggle('text-blue-900',active);button.classList.toggle('border-transparent',!active);button.classList.toggle('text-slate-700',!active);button.classList.toggle('hover:border-slate-200',!active);button.classList.toggle('hover:bg-slate-50',!active)})}
 function navigateToAtomicSection(sectionId){
   const mapping=atomicSectionMappings.get(String(sectionId)),notice=document.getElementById('atomicNavigationStatus');setActiveAtomicSection(String(sectionId));clearPdfHighlights();
@@ -815,7 +800,8 @@ function renderSelectionStates(){document.querySelectorAll('.analysis-item[data-
 function selectSharedProposition(proposition,{open=true}={}){if(!proposition)return;showSharedProposition(proposition);if(!open)closeSharedInspector()}
 function propositionButton(proposition,extra=''){const button=document.createElement('button');button.type='button';button.dataset.propositionId=proposition.id;button.className='analysis-item w-full rounded-lg border border-slate-200 bg-white p-3 text-left hover:border-blue-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-600';const labels=[(proposition.proposition_type||'other').replaceAll('_',' '),...(proposition.argumentative_roles||[]),proposition.review_status||'pending'];for(const label of labels.slice(0,3)){const badge=uiText(button,'span','analysis-badge mr-1 mb-1',label.replaceAll('_',' '));if(label==='warrant')badge.classList.add('analysis-badge-amber')}if(proposition.assertion_origin==='hypothetical'){const hypothetical=uiText(button,'span','analysis-badge analysis-badge-amber mr-1 mb-1','Hypothetical');hypothetical.title='Critical-analysis scenario; not a paper finding'}else if(proposition.is_inferred){const inferred=uiText(button,'span','analysis-badge analysis-badge-amber mr-1 mb-1','AI inferred');inferred.title='Reconstructed by AI; not written verbatim by the authors'}if(extra)uiText(button,'span','ml-1 text-[11px] text-slate-500',extra);uiText(button,'span','mt-1 block line-clamp-3 text-sm leading-5 text-slate-800',proposition.text||'');button.addEventListener('click',()=>selectSharedProposition(proposition));return button}
 function renderImradSection(){const sections=argumentationData?.sections||[],select=document.getElementById('imradSectionSelect'),section=sections.find(item=>item.id===select.value)||sections[0],heading=document.getElementById('imradSectionHeading'),text=document.getElementById('imradSectionText'),list=document.getElementById('imradPropositions');list.replaceChildren();if(!section){heading.textContent='No document sections available';text.textContent='This analysis does not contain structured section data.';return}selectedSectionId=section.id;heading.textContent=(section.heading||section.section_type||'Section')+(section.page?' · page '+section.page:'');text.textContent=section.text||'No section text was saved.';const propositions=(argumentationData?.propositions||[]).filter(item=>item.section_id===section.id);for(const proposition of propositions)list.append(propositionButton(proposition));if(!propositions.length)uiText(list,'p','text-sm text-slate-500','No propositions are linked to this section.');if(selectedPropositionId){const selected=propositions.find(item=>item.id===selectedPropositionId);if(selected)document.querySelector(`#imradPropositions [data-proposition-id="${CSS.escape(selected.id)}"]`)?.setAttribute('aria-pressed','true')}}
-function renderImrad(){const sections=argumentationData?.sections||[],select=document.getElementById('imradSectionSelect'),old=selectedSectionId;select.replaceChildren();for(const section of sections){const option=document.createElement('option');option.value=section.id;option.textContent=(section.heading||section.section_type||'Section')+(section.page?' · p. '+section.page:'');select.append(option)}const types=new Set(sections.map(section=>(section.section_type||'').toLowerCase()));const expected=['abstract','introduction','methods','results','discussion','conclusion'];const missing=expected.filter(type=>![...types].some(value=>value.includes(type)));const metadata=argumentationData?.document_metadata||{};document.getElementById('imradCompleteness').textContent=sections.length?(metadata.completeness_warning|| (missing.length?'Available extracted sections · missing common sections: '+missing.join(', '):'Structured sections available from the extracted document.')):'No structured sections were saved for this analysis.';if(!sections.length){document.getElementById('imradSectionHeading').textContent='No sections available';document.getElementById('imradSectionText').textContent='';document.getElementById('imradPropositions').replaceChildren();return}select.value=sections.some(item=>item.id===old)?old:sections[0].id;renderImradSection()}
+function renderInputCoverage(label,coverage){if(!coverage)return'';const full=Number(coverage.full_text_characters??coverage.eligible_content_characters_chunked)||0,submitted=Number(coverage.characters_submitted??coverage.eligible_content_characters_submitted)||0,chunks=Number(coverage.chunk_count)||0,completed=Number(coverage.chunks_successfully_analyzed??coverage.processed_chunk_ids?.length)||0,all=coverage.all_mapped_text_submitted===true||coverage.all_eligible_content_chunks_processed===true;return `${label}: ${submitted.toLocaleString()} / ${full.toLocaleString()} source characters, ${completed||chunks} / ${chunks} chunks ${all?'completed':'processed'}`}
+function renderImrad(){const sections=argumentationData?.sections||[],select=document.getElementById('imradSectionSelect'),old=selectedSectionId;select.replaceChildren();for(const section of sections){const option=document.createElement('option');option.value=section.id;option.textContent=(section.heading||section.section_type||'Section')+(section.page?' · p. '+section.page:'');select.append(option)}const types=new Set(sections.map(section=>(section.section_type||'').toLowerCase()));const expected=['abstract','introduction','methods','results','discussion','conclusion'];const missing=expected.filter(type=>![...types].some(value=>value.includes(type)));const metadata=argumentationData?.document_metadata||{},quality=metadata.extraction_quality||{},engine=quality.engine?`Extraction engine: ${quality.engine}`:'',overlap=Number.isFinite(quality.recall_percent)?`estimated PDF text-layer word overlap: ${quality.recall_percent}%`:'',profile=argumentationData?.analysis_payload?.paper_profile||{},reviewCoverage=renderInputCoverage('Full-text review',metadata.fulltext_mapping?.ai_coverage),propositionCoverage=renderInputCoverage('Proposition extraction',argumentationData?.validation?.proposition_input_coverage),profileText=renderInputCoverage('Paper profile',Object.assign({},profile.retrieval||{},{full_text_characters:profile.retrieval?.profile_input_characters_chunked,characters_submitted:profile.retrieval?.profile_input_characters_chunked,chunk_count:profile.retrieval?.profile_input_chunk_count,chunks_successfully_analyzed:profile.retrieval?.profile_input_chunk_count,all_mapped_text_submitted:profile.retrieval?.profile_input_all_chunks_submitted})),profileCoverage=renderInputCoverage('Outline analysis',profile.outline_processing),qualitySummary=[engine,overlap,reviewCoverage,propositionCoverage,profileText,profileCoverage].filter(Boolean).join(' · '),completeness=metadata.completeness_warning||(missing.length?'Available extracted sections · missing common sections: '+missing.join(', '):'Structured sections available from the extracted document.');document.getElementById('imradCompleteness').textContent=sections.length?[completeness,qualitySummary].filter(Boolean).join(' · '):'No structured sections were saved for this analysis.';if(!sections.length){document.getElementById('imradSectionHeading').textContent='No sections available';document.getElementById('imradSectionText').textContent='';document.getElementById('imradPropositions').replaceChildren();return}select.value=sections.some(item=>item.id===old)?old:sections[0].id;renderImradSection()}
 function renderScientificTypes(){const root=document.getElementById('scientificTypeGroups');root.replaceChildren();const labels={background:'Background',research_gap:'Research Gap',research_question:'Research Question',objective:'Objective',hypothesis:'Hypothesis',assumption:'Assumption',finding:'Finding',conclusion:'Conclusion',implication:'Implication',limitation:'Limitation',future_work:'Future Work',other:'Other'},query=document.getElementById('scientificTypeSearch').value.trim().toLowerCase(),groups=new Map();for(const item of argumentationData?.propositions||[]){if(query&&!`${item.text} ${item.source_quote||''}`.toLowerCase().includes(query))continue;const type=item.proposition_type||'other';if(!groups.has(type))groups.set(type,[]);groups.get(type).push(item)}const order=Object.keys(labels);for(const type of [...groups.keys()].sort((a,b)=>{const ai=order.indexOf(a),bi=order.indexOf(b);return(ai<0?99:ai)-(bi<0?99:bi)||a.localeCompare(b)})){const items=groups.get(type),section=document.createElement('section');section.className='border-b border-slate-200 pb-3';const title=uiText(section,'h4','mb-2 text-sm font-semibold text-slate-800',labels[type]||type.replaceAll('_',' '));const count=uiText(title,'span','ml-2 text-xs font-normal text-slate-500',String(items.length));const list=document.createElement('div');list.className='grid gap-2 md:grid-cols-2';for(const item of items)list.append(propositionButton(item));section.append(list);root.append(section)}if(!groups.size)uiText(root,'p','rounded-lg border border-dashed border-slate-300 p-6 text-sm text-slate-500','No saved scientific propositions match this search.')}
 function syncSelectionToAif(){if(!selectedPropositionId||!aifState.graph)return;const nodes=aifState.graph.nodes||[],edges=aifState.graph.edges||[],node=nodes.find(item=>item.proposition_id===selectedPropositionId);if(!node)return;aifState.selectedNodeId=node.id;const candidate=(nodes.filter(item=>item.node_type==='RA').find(ra=>edges.some(edge=>(edge.source_node_id===node.id||edge.target_node_id===node.id)&&(edge.source_node_id===ra.id||edge.target_node_id===ra.id))));if(candidate)aifState.selectedRaId=candidate.id}
 function fitAifGraph(){if(aifState.mode==="toulmin"){window.toulminGraphControls?.fitView();return true}window.aifGraphControls?.fitView();return true}
@@ -969,7 +955,7 @@ async function openDraft(paper) {
   document.querySelectorAll('#aifAttackMenu [role=option]').forEach(option => option.setAttribute('aria-selected', String(option.dataset.value === 'all')));
   aifState.loading = true; aifState.graph = null;
   const modal = document.getElementById('draftModal'); modal.classList.remove('hidden'); modal.classList.add('flex'); modal.setAttribute('aria-hidden', 'false');
-  const requestedTab = paperDetailMode && new URLSearchParams(window.location.search).get('tab') === 'atomic' ? 'atomic' : 'analysis';
+  const requestedTab = paperDetailMode && ['stanceEngagement','atomic'].includes(new URLSearchParams(window.location.search).get('tab')) ? 'stanceEngagement' : 'analysis';
   selectDraftTab(requestedTab, {syncUrl:false}); renderAifGraph(null);
   const title = paper.title || paper.doi, draftTitle = document.getElementById('draftTitle'), doi = document.getElementById('draftMeta');
   draftTitle.textContent = title; draftTitle.title = title;
@@ -1005,6 +991,8 @@ async function openDraft(paper) {
     retry.type = 'button'; retry.onclick = () => { void openDraft(paper); };
   }
 }
+const openDraftBeforeDemoPreview=openDraft;
+openDraft=async function(paper){if(!demoProcessingPreview)return openDraftBeforeDemoPreview(paper);await analysisProcessing.start(paper,{demo:true})};
 function renderSaffronAnalysis(result, openAlex) {
   const status = document.getElementById('saffronAnalysisStatus');
   const termsRoot = document.getElementById('saffronTerms');
@@ -1093,6 +1081,7 @@ function renderSaffronAnalysis(result, openAlex) {
 }
 
 async function retrySaffronAnalysis() {
+  if(analysisDemoLocked){notice('SAFFRON retry is disabled while demo lock is on.',true);return}
   if (!currentDoi || !currentPaper) return;
   const doi = currentDoi, paper = currentPaper, button = document.getElementById('saffronRetryButton');
   button.disabled = true; button.textContent = 'Running SAFFRON…';
@@ -1107,7 +1096,7 @@ async function retrySaffronAnalysis() {
   } catch (error) {
     notice(error.message || 'Could not retry SAFFRON for this paper.', true);
   } finally {
-    button.disabled = false; button.textContent = 'Retry SAFFRON';
+    button.disabled = analysisDemoLocked; button.textContent = 'Retry SAFFRON';
   }
 }
 document.getElementById('saffronRetryButton').addEventListener('click', retrySaffronAnalysis);
@@ -1140,13 +1129,12 @@ document.getElementById('pdfZoomOut').addEventListener('click',()=>{pdfZoom=Math
 const splitter=document.getElementById('paperSplitHandle');splitter.addEventListener('pointerdown',event=>{splitter.setPointerCapture(event.pointerId);splitter.dataset.dragging='true'});splitter.addEventListener('pointermove',event=>{if(splitter.dataset.dragging!=='true')return;const rect=document.getElementById('draftViewArea').getBoundingClientRect(),percent=Math.max(28,Math.min(72,(event.clientX-rect.left)/rect.width*100));document.getElementById('draftViewArea').style.setProperty('--explorer-width',percent+'%')});splitter.addEventListener('pointerup',()=>splitter.dataset.dragging='false');splitter.addEventListener('keydown',event=>{if(!['ArrowLeft','ArrowRight'].includes(event.key))return;event.preventDefault();const area=document.getElementById('draftViewArea'),current=parseFloat(getComputedStyle(area).getPropertyValue('--explorer-width'))||48;area.style.setProperty('--explorer-width',Math.max(28,Math.min(72,current+(event.key==='ArrowRight'?3:-3)))+'%')});
 document.addEventListener('click',event=>{if(!paperDetailMode||event.target.closest('[data-atomic-evidence]'))return;const propButton=event.target.closest('[data-proposition-id]'),nodeButton=event.target.closest('[data-node-id]');setTimeout(()=>{let proposition=propButton?argumentationData?.propositions?.find(item=>item.id===propButton.dataset.propositionId):null;if(!proposition&&nodeButton){const node=(aifState.graph?.nodes||[]).find(item=>item.id===nodeButton.dataset.nodeId);proposition=argumentationData?.propositions?.find(item=>item.id===node?.proposition_id)}if(!proposition&&!nodeButton&&!propButton&&selectedPropositionId)proposition=argumentationData?.propositions?.find(item=>item.id===selectedPropositionId);if(proposition&&proposition.id!==pdfSelectedId)selectPdfSource(proposition)},0)});
 async function loadCrossPaper(){try{const r=await fetch('/api/analysis/cross-paper'),d=await r.json(),list=document.getElementById('crossPaperList');list.replaceChildren();const batch=d.batch;document.getElementById('crossPaperStatus').textContent=batch?('Run '+batch.id+' · '+batch.status+' · '+(batch.model||batch.provider||'')+' - candidates awaiting review'):'No comparisons yet.';for(const x of d.relationships||[]){const card=document.createElement('article');card.className='rounded-xl border border-slate-200 bg-white p-4';uiText(card,'h3','font-semibold text-slate-900',x.relationship.replaceAll('_',' ')+' · '+x.review_status+(x.stale?' - stale':''));uiText(card,'p','mt-2 text-sm leading-6 text-slate-700',x.explanation);const quotes=document.createElement('div');quotes.className='mt-3 grid gap-2 md:grid-cols-2';uiText(quotes,'blockquote','rounded-lg bg-slate-50 p-3 text-xs leading-5 text-slate-700',x.source_doi+' · “'+x.source_quote+'”');uiText(quotes,'blockquote','rounded-lg bg-slate-50 p-3 text-xs leading-5 text-slate-700',x.target_doi+' · “'+x.target_quote+'”');card.append(quotes);uiText(card,'p','mt-2 text-xs text-slate-500','AI confidence '+Math.round((x.confidence||0)*100)+'% · '+(x.provenance?.model||''));const actions=document.createElement('div');actions.className='mt-3 flex gap-2';for(const [decision,label] of [['approved','Approve candidate'],['rejected','Reject']]){const b=uiText(actions,'button','rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700',label+(x.review_status===decision?' (saved)':''));b.disabled=x.review_status===decision;b.onclick=async()=>{const r=await fetch('/api/analysis/cross-paper/'+x.id+'/review',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({decision})});if(r.ok)await loadCrossPaper()}}card.append(actions);list.append(card)}if(!list.children.length&&batch?.status==='DONE')uiText(list,'p','text-sm text-slate-500','No sufficiently supported candidates were found among the approved propositions.')}catch(e){document.getElementById('crossPaperStatus').textContent=e.message}}
-document.getElementById('crossPaperBtn').addEventListener('click',async()=>{const b=document.getElementById('crossPaperBtn'),s=document.getElementById('crossPaperStatus');b.disabled=true;s.textContent='Comparing approved propositions...';try{const r=await fetch('/api/analysis/cross-paper',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider:document.getElementById('provider').value})}),d=await r.json();if(!r.ok)throw Error(d.error||'Could not analyze cross-paper relationships.');s.textContent='Created '+d.candidate_count+' candidates; all require reviewer confirmation.';await loadCrossPaper()}catch(e){s.textContent=e.message}finally{b.disabled=false}});
+document.getElementById('crossPaperBtn').addEventListener('click',async()=>{if(analysisDemoLocked)return;const b=document.getElementById('crossPaperBtn'),s=document.getElementById('crossPaperStatus');b.disabled=true;s.textContent='Comparing approved propositions...';try{const r=await fetch('/api/analysis/cross-paper',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider:document.getElementById('provider').value})}),d=await r.json();if(!r.ok)throw Error(d.error||'Could not analyze cross-paper relationships.');s.textContent='Created '+d.candidate_count+' candidates; all require reviewer confirmation.';await loadCrossPaper()}catch(e){s.textContent=e.message}finally{b.disabled=analysisDemoLocked}});
 function editRelationForm(parent,id){const relation=(argumentationData?.relations||[]).find(x=>x.id===id);if(!relation)return;const form=document.createElement('details');form.className='mt-3 rounded border bg-white';uiText(form,'summary','cursor-pointer p-3 text-sm font-semibold','Edit relation and graph target');const body=document.createElement('div');body.className='space-y-2 border-t p-3';const kind=document.createElement('select');kind.className='w-full rounded border bg-white p-2 text-sm';for(const v of ['supports','undermine','undercut','rebut','qualifies','extends']){const o=document.createElement('option');o.value=v;o.textContent=v;kind.append(o)}kind.value=relation.relation_type;body.append(kind);const premises=document.createElement('input');premises.className='w-full rounded border p-2 text-sm';premises.value=relation.premise_ids.join(', ');premises.placeholder='Premise IDs, comma-separated';body.append(premises);const conclusion=document.createElement('input');conclusion.className='w-full rounded border p-2 text-sm';conclusion.value=relation.conclusion_id||'';conclusion.placeholder='Conclusion ID';body.append(conclusion);const target=document.createElement('input');target.className='w-full rounded border p-2 text-sm';target.value=relation.target_id||'';target.placeholder='Proposition ID or undercut RA ID';body.append(target);const targetKind=document.createElement('select');targetKind.className='w-full rounded border bg-white p-2 text-sm';for(const v of ['proposition','inference']){const o=document.createElement('option');o.value=v;o.textContent=v;targetKind.append(o)}targetKind.value=relation.target_kind||'proposition';body.append(targetKind);const explanation=document.createElement('textarea');explanation.className='w-full rounded border p-2 text-sm';explanation.rows=3;explanation.value=relation.explanation||'';body.append(explanation);const save=uiText(body,'button','rounded bg-blue-600 px-3 py-2 text-sm font-semibold text-white','Save relationship');save.type='button';save.onclick=async()=>{const r=await fetch('/api/analysis/edit/'+encodeURIComponent(currentDoi),{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({item_id:id,item_type:'relation',changes:{relation_type:kind.value,premise_ids:premises.value.split(',').map(x=>x.trim()).filter(Boolean),conclusion_id:conclusion.value||null,target_id:target.value||null,target_kind:targetKind.value,explanation:explanation.value},note:'Human graph correction'})}),d=await r.json();if(!r.ok)notice(d.error,true);else await openDraft(currentPaper)};form.append(body);parent.append(form)}
 loadCrossPaper();
-(async()=>{if(paperDetailMode){document.getElementById('draftModal').setAttribute('aria-modal','false');document.getElementById('draftViewArea').append(document.getElementById('paperWorkspace'))}try{config=await(await fetch('/api/analysis/config')).json();document.getElementById('provider').value=config.default_provider||'ollama';const gemini=document.querySelector('#provider option[value="gemini"]');gemini.disabled=!config.gemini_configured;providerHint()}catch{}await loadPapers();if(paperDetailMode){const doi=document.body.dataset.paperId,paper=currentPapers.find(item=>item.doi===doi);if(!paper){setPdfStatus('This paper is not available in the analysis library.',true);document.getElementById('draftTitle').textContent='Paper not found';renderAtomicPaperContext({doi});renderAtomicSections('error');return}const index=currentPapers.indexOf(paper);document.getElementById('paperPrev').disabled=index<=0;document.getElementById('paperNext').disabled=index===currentPapers.length-1;document.getElementById('paperBreadcrumbTitle').textContent=paper.title||paper.doi;document.getElementById('paperAuthorsMeta').textContent=[paper.authors,paper.year,paper.journal].filter(Boolean).join(' ? ');await openDraft(paper);await loadPdfViewer()}else setInterval(loadPapers,5000)})();
+(async()=>{if(paperDetailMode){document.getElementById('draftModal').setAttribute('aria-modal','false');document.getElementById('draftViewArea').append(document.getElementById('paperWorkspace'))}try{config=await(await fetch('/api/analysis/config')).json();document.getElementById('provider').value=config.default_provider||'ollama';const gemini=document.querySelector('#provider option[value="gemini"]');gemini.disabled=!config.gemini_configured;providerHint()}catch{}await loadPapers();if(paperDetailMode){const doi=document.body.dataset.paperId,paper=currentPapers.find(item=>item.doi===doi);if(!paper){setPdfStatus('This paper is not available in the analysis library.',true);document.getElementById('draftTitle').textContent='Paper not found';renderAtomicPaperContext({doi});renderAtomicSections('error');return}const index=currentPapers.indexOf(paper);document.getElementById('paperPrev').disabled=index<=0;document.getElementById('paperNext').disabled=index===currentPapers.length-1;document.getElementById('paperBreadcrumbTitle').textContent=paper.title||paper.doi;document.getElementById('paperAuthorsMeta').textContent=[paper.authors,paper.year,paper.journal].filter(Boolean).join(' ? ');if(['PENDING','PROCESSING','FAILED'].includes(paper.analysis_status)){analysisProcessing.start(paper,{onViewResults:async completedPaper=>{await openDraft(completedPaper);await loadPdfViewer()}})}else{await openDraft(paper);if(!demoProcessingPreview)await loadPdfViewer()}}else setInterval(loadPapers,5000)})();
 </script>
 <script>
-{% if atomic_focus_mode %}
 const atomicStanceGroups=[['stance','Stance'],['engagement','Engagement']];
 function atomicText(tag,className,text){const node=document.createElement(tag);node.className=className;node.textContent=text;return node}
 async function atomicResponseJson(response){const body=await response.text();try{return body.trim()?JSON.parse(body):{}}catch{const detail=body.replace(/\s+/g,' ').trim().slice(0,240)||response.statusText||'Empty response';throw Error('Server returned a non-JSON response (HTTP '+response.status+'): '+detail)}}
@@ -1186,27 +1174,35 @@ function renderAtomicStanceResult(result){
   const status=document.getElementById('atomicExtractionStatus'),root=document.getElementById('atomicStanceTable');
   if(!status||!root)return;
   root.replaceChildren();
-  if(!result){renderAtomicStanceEvidence([]);status.classList.add('hidden');status.textContent='';return}
+  if(!result){
+    const evidence=document.getElementById('atomicStanceTrace'),empty=document.getElementById('atomicEvidenceEmpty');
+    const provenance=document.getElementById('atomicStanceProvenance');
+    evidence?.replaceChildren();
+    if(empty)empty.textContent='Source evidence will appear here after Stance & Engagement analysis completes.';
+    if(provenance)provenance.textContent='';
+    return;
+  }
   status.classList.add('hidden');
   const stance=result.categories?.stance||{},engagement=result.categories?.engagement||{};
   const left=Array.isArray(stance.categories)?stance.categories:[],right=Array.isArray(engagement.categories)?engagement.categories:[];
   renderAtomicStanceEvidence([stance,engagement]);
-  const format=value=>value==null?'—':Number(value).toFixed(1);
+  const format=value=>value==null?'—':Number(value).toFixed(1),formatCount=value=>Number.isFinite(Number(value))?Number(value).toLocaleString():'0';
   const wrapper=document.createElement('div');wrapper.className='overflow-x-auto';
-  const table=document.createElement('table');table.className='w-full min-w-[720px] border-collapse text-left text-sm';
+  const table=document.createElement('table');table.className='w-full min-w-[880px] border-collapse text-left text-sm';
   const caption=document.createElement('caption');caption.className='mb-3 text-left text-base font-semibold text-slate-800';caption.textContent='Stance and Engagement features in this paper';table.append(caption);
   const thead=document.createElement('thead');
   const groupHead=document.createElement('tr');groupHead.className='border-y-2 border-slate-800 text-slate-900';
-  for(const [label,span] of [['Stance',3],['Engagement',3]]){const cell=atomicText('th','px-3 py-2 font-semibold',label);cell.colSpan=span;groupHead.append(cell)}
+  for(const [label,span] of [['Stance',4],['Engagement',4]]){const cell=atomicText('th','px-3 py-2 font-semibold',label);cell.colSpan=span;groupHead.append(cell)}
   thead.append(groupHead);
   const columnHead=document.createElement('tr');columnHead.className='border-b-2 border-slate-800 text-slate-700';
-  for(const label of ['Category','Items per 1000 words','% of total','Category','Items per 1000 words','% of total'])columnHead.append(atomicText('th','px-3 py-2 font-medium',label));
+  for(const label of ['Category','Occurrences','Items per 1000 words','% of total','Category','Occurrences','Items per 1000 words','% of total'])columnHead.append(atomicText('th','px-3 py-2 font-medium',label));
   thead.append(columnHead);table.append(thead);
   const tbody=document.createElement('tbody'),rowCount=Math.max(left.length,right.length);
   for(let index=0;index<rowCount;index++){
     const row=document.createElement('tr');row.className='border-b border-slate-200';
     for(const item of [left[index],right[index]]){
       row.append(atomicText(item?'th':'td',item?'px-3 py-2 font-medium text-slate-800':'px-3 py-2',''+(item?.label||'')));
+      row.append(atomicText('td','px-3 py-2 tabular-nums text-slate-700',item?formatCount(item.count):''));
       row.append(atomicText('td','px-3 py-2 tabular-nums text-slate-700',item?format(item.per_1000_words):''));
       row.append(atomicText('td','px-3 py-2 tabular-nums text-slate-700',item?format(item.percent_of_group):''));
     }
@@ -1215,29 +1211,36 @@ function renderAtomicStanceResult(result){
   const total=document.createElement('tr');total.className='border-t-2 border-slate-800 font-semibold';
   for(const group of [stance,engagement]){
     total.append(atomicText('th','px-3 py-2 text-slate-900','Totals'));
+    total.append(atomicText('td','px-3 py-2 tabular-nums text-slate-900',formatCount(group.total_count)));
     total.append(atomicText('td','px-3 py-2 tabular-nums text-slate-900',format(group.total_per_1000_words)));
     total.append(atomicText('td','px-3 py-2 tabular-nums text-slate-900',group.total_count?'100.0':'—'));
   }
-  tbody.append(total);table.append(tbody);wrapper.append(table);root.append(wrapper)
+  tbody.append(total);table.append(tbody);wrapper.append(table);root.append(wrapper);
+  const provenance=document.getElementById('atomicStanceProvenance'),meta=result.provenance||{};
+  if(provenance){const analyzedWords=Number(meta.word_count||0).toLocaleString(),coverage=meta.input_coverage||{},coverageSummary=coverage.chunk_count?`${formatCount(coverage.characters_submitted)} / ${formatCount(coverage.full_text_characters)} characters across ${formatCount(coverage.chunks_successfully_analyzed)} / ${formatCount(coverage.chunk_count)} completed chunks`:'input coverage was not recorded for this saved result';provenance.textContent=`AI analysis of this paper's source text · ${analyzedWords} words · ${coverageSummary} · ${formatCount(meta.accepted_count)} source-validated occurrences from ${formatCount(meta.candidate_count)} reviewed candidates · ${meta.provider||'provider unavailable'}${meta.model?' / '+meta.model:''}. Rates use accepted occurrences per 1,000 source words; “—” means the group has no accepted occurrences, so a percentage cannot be calculated. Human review is still required.`}
 }
 async function loadAtomicStanceResult(){
-  const button=document.getElementById('atomicExtractButton'),status=document.getElementById('atomicExtractionStatus'),paper=currentPaper,doi=currentDoi;
-  if(!button||!status||!paper||!doi)return;
-  button.disabled=paper.source_kind!=='pdf';button.title=button.disabled?'A saved PDF is required.':'Run only the source-traced Stance and Engagement analysis.';
-  try{const response=await fetch('/api/analysis/atomic/stance-engagement/'+encodeURIComponent(doi)),data=await atomicResponseJson(response);if(currentDoi!==doi)return;if(!response.ok)throw Error(data.error||'Could not load the saved result.');renderAtomicStanceResult(data.result);if(data.stale){status.classList.remove('hidden');status.textContent=data.stale_reason==='analysis_version'?'Analysis rules updated. Run again.':'Source changed. Run again.'}}catch(error){if(currentDoi===doi){status.classList.remove('hidden');status.textContent=error.message||'Could not load the saved result.'}}
+  const status=document.getElementById('atomicExtractionStatus'),paper=currentPaper,doi=currentDoi;
+  if(!status||!paper||!doi)return;
+  try{
+    const response=await fetch('/api/analysis/atomic/stance-engagement/'+encodeURIComponent(doi)),data=await atomicResponseJson(response);
+    if(currentDoi!==doi)return;
+    if(!response.ok)throw Error(data.error||'Could not load the saved result.');
+    renderAtomicStanceResult(data.result);
+    if(data.stale){status.classList.remove('hidden');status.textContent=data.stale_reason==='analysis_version'?'Analysis rules changed. Reanalyze this paper from the analysis list.':'The source changed. Reanalyze this paper from the analysis list.';return}
+    if(data.result){
+      return;
+    }
+    status.classList.remove('hidden');
+    if(paper.source_kind!=='pdf')status.textContent='Stance & Engagement analysis requires a saved PDF source.';
+    else if(['PENDING','PROCESSING'].includes(paper.analysis_status))status.textContent='Stance & Engagement runs as part of the full paper analysis. Check back when the queue finishes.';
+    else status.textContent='No Stance & Engagement result is saved yet. Add this paper to the analysis queue or choose Reanalyze in the paper list.';
+  }catch(error){if(currentDoi===doi){status.classList.remove('hidden');status.textContent=error.message||'Could not load the saved result.'}}
 }
-    const openDraftBeforeAtomicFocus=openDraft;
-openDraft=async function(paper){await openDraftBeforeAtomicFocus(paper);if(document.body.classList.contains('atomic-focus-mode')){selectDraftTab('atomic');void loadAtomicStanceResult()}};
-document.getElementById('draftTabAtomic').addEventListener('click',()=>{void loadAtomicStanceResult()});
-document.getElementById('draftTabAtomic').addEventListener('focus',()=>{void loadAtomicStanceResult()});
-document.getElementById('atomicExtractButton').addEventListener('click',async()=>{
-  if(!currentDoi||!currentPaper)return;const button=document.getElementById('atomicExtractButton'),status=document.getElementById('atomicExtractionStatus'),doi=currentDoi;
-  button.disabled=true;button.textContent='Analyzing…';status.classList.remove('hidden');status.textContent='Analyzing…';
-  try{const response=await fetch('/api/analysis/atomic/stance-engagement/'+encodeURIComponent(doi),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider:document.getElementById('provider').value})}),data=await atomicResponseJson(response);if(!response.ok)throw Error(data.error||'Analysis failed.');if(currentDoi!==doi)return;renderAtomicStanceResult(data.result);}
-  catch(error){status.classList.remove('hidden');status.textContent=error.message||'Analysis failed.'}
-  finally{if(currentDoi===doi){button.textContent='Analyze paper';button.disabled=currentPaper?.source_kind!=='pdf'}}
-});
-{% endif %}
+const openDraftBeforeStanceEngagement=openDraft;
+openDraft=async function(paper){await openDraftBeforeStanceEngagement(paper);if(!demoProcessingPreview&&document.getElementById('draftTabStanceEngagement').getAttribute('aria-selected')==='true')void loadAtomicStanceResult()};
+document.getElementById('draftTabStanceEngagement').addEventListener('click',()=>{void loadAtomicStanceResult()});
+document.getElementById('draftTabStanceEngagement').addEventListener('focus',()=>{void loadAtomicStanceResult()});
 const mvp3Dimensions=[['logical_validity','Logical validity'],['evidence_sufficiency','Evidence sufficiency'],['evidence_credibility','Evidence credibility'],['relevance','Relevance'],['attack_resilience','Attack resilience'],['scientific_qualification','Scientific qualification']];
 function renderMvp3Evaluation(){
   const list=document.getElementById('mvp3ArgumentList'),benchmarkBox=document.getElementById('mvp3Benchmark');
