@@ -517,10 +517,10 @@ function render() {
       const view=document.createElement('button');view.className='rounded-xl border border-blue-200 bg-blue-50 px-3.5 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-100';view.textContent='Xem draft';view.addEventListener('click',()=>navigatePaper(paper));actions.append(view);
       const rerun=document.createElement('button');rerun.className='rounded-xl border border-slate-300 px-3.5 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50';rerun.textContent=analysisDemoLocked?'Preview demo':'Reanalyze';rerun.addEventListener('click',()=>analysisDemoLocked?navigateDemoPaper(paper):enqueue([paper.doi]));actions.append(rerun);
     } else if(['PENDING','PROCESSING'].includes(paper.analysis_status)) {
-      const progress=document.createElement('button');progress.className='rounded-xl border border-blue-200 bg-blue-50 px-3.5 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-100';progress.textContent=analysisDemoLocked?'Preview demo':paper.analysis_status==='PROCESSING'?'View progress':'View queue status';progress.addEventListener('click',()=>analysisDemoLocked?navigateDemoPaper(paper):navigatePaper(paper));actions.append(progress);
+      const progress=document.createElement('button');progress.className='rounded-xl border border-blue-200 bg-blue-50 px-3.5 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-100';progress.textContent=analysisDemoLocked?'Preview demo':paper.analysis_status==='PROCESSING'?'View progress':'View queue status';progress.addEventListener('click',()=>analysisDemoLocked?navigateDemoPaper(paper):navigateProcessing(paper));actions.append(progress);
     } else {
       const start=document.createElement('button');start.className='rounded-xl bg-blue-600 px-3.5 py-2 text-sm font-semibold text-white hover:bg-blue-700';start.textContent=analysisDemoLocked?'Preview demo':paper.analysis_status==='FAILED'?'Retry':'Add to queue';start.addEventListener('click',()=>analysisDemoLocked?navigateDemoPaper(paper):enqueue([paper.doi]));actions.append(start);
-      if(paper.analysis_status==='FAILED'){const view=document.createElement('button');view.className='rounded-xl border border-slate-300 px-3.5 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50';view.textContent='View failure';view.addEventListener('click',()=>navigatePaper(paper));actions.append(view)}
+      if(paper.analysis_status==='FAILED'){const view=document.createElement('button');view.className='rounded-xl border border-slate-300 px-3.5 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50';view.textContent='View failure';view.addEventListener('click',()=>navigateProcessing(paper));actions.append(view)}
     }
     card.append(info,actions); listEl.append(card);
   }
@@ -548,10 +548,15 @@ const demoProcessingPreview=new URLSearchParams(window.location.search).get('dem
 const analysisProcessing=new window.AnalysisProcessingExperience();
 analysisProcessing.onStart=paper=>{currentPaper=paper;currentDoi=paper.doi};
 const startPaperProcessing=analysisProcessing.start.bind(analysisProcessing);
-analysisProcessing.start=(paper,options={})=>startPaperProcessing(paper,{...options,demo:demoProcessingPreview||Boolean(options.demo)});
+analysisProcessing.start=(paper,options={})=>{
+  if(paperDetailMode&&(demoProcessingPreview||['PENDING','PROCESSING','FAILED'].includes(paper.analysis_status))){location.replace(processingPaperUrl(paper.doi)+(demoProcessingPreview?'&demo=1':''));return Promise.resolve()}
+  return startPaperProcessing(paper,{...options,demo:demoProcessingPreview||Boolean(options.demo)})
+};
 function paperUrl(doi){return '/analysis/paper/'+encodeURIComponent(doi)+'?from='+encodeURIComponent('/analysis')}
+function processingPaperUrl(doi){return '/analysis/processing/paper/'+encodeURIComponent(doi)+'?from='+encodeURIComponent('/analysis')}
 function navigatePaper(paper){location.href=paperUrl(paper.doi)}
-function navigateDemoPaper(paper){location.href=paperUrl(paper.doi)+'&demo=1'}
+function navigateProcessing(paper){location.href=processingPaperUrl(paper.doi)}
+function navigateDemoPaper(paper){location.href=processingPaperUrl(paper.doi)+'&demo=1'}
 function navigateNeighbor(direction){const index=currentPapers.findIndex(paper=>paper.doi===currentDoi),next=currentPapers[index+direction];if(next)navigatePaper(next)}
 let pdfDocument=null,pdfZoom=1,pdfPages=[],pdfHighlightsOn=true,pdfSelectedId=null;
 let atomicSectionMappings=new Map(),activeAtomicSectionId='',atomicPdfSha256='',atomicPdfHashError='',atomicPdfLoadState='loading',atomicScrollFrame=0,atomicLastVisiblePage=null,atomicProgrammaticScroll=false,atomicProgrammaticSyncTimer=0;

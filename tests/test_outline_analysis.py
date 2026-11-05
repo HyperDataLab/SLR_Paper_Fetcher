@@ -1,5 +1,6 @@
 import unittest
 import json
+import hashlib
 import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -15,11 +16,24 @@ from ai_analysis import (
     _outline_evidence_records,
     _preferred_profile_keywords,
     _quote_span,
+    _retrieve_profile_evidence,
+    _section_chunks,
+    _verify_text_chunk_coverage,
     _write_fulltext_mapping,
     build_outline_layers,
 )
 from automatic_sources import fetch_openalex_classification
 from paper_store import PaperStore, remap_outline_source_ids, repair_legacy_outline_group_references
+
+
+def _attach_valid_ollama_sidecar(metadata, pdf_path):
+    markdown_path = pdf_path.with_suffix(".ollama.md")
+    markdown_path.write_text("# Extracted PDF source\n", encoding="utf-8")
+    metadata["extraction_artifacts"] = {
+        "engine": "ollama_vision_api",
+        "markdown_file": markdown_path.name,
+        "markdown_sha256": hashlib.sha256(markdown_path.read_bytes()).hexdigest(),
+    }
 
 
 class OutlineParserTests(unittest.TestCase):
@@ -61,6 +75,7 @@ class OutlineParserTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             pdf_path = Path(directory) / "paper.pdf"
             pdf_path.write_bytes(b"%PDF test artifact")
+            _attach_valid_ollama_sidecar(document["metadata"], pdf_path)
             mapping_path = _write_fulltext_mapping(pdf_path, document, _pdf_artifact_identity(pdf_path))
             loaded = _load_and_validate_fulltext_mapping(mapping_path)
         paragraphs = loaded["sections"][0]["paragraphs"]
@@ -267,6 +282,30 @@ class OutlineLayersTests(unittest.TestCase):
         self.assertEqual({pid for chunk in chunks for pid in chunk["paragraph_ids"]}, {"p1", "p2", "p3"})
         self.assertTrue(all(chunk["chunk_id"] for chunk in chunks))
 
+    def test_profile_and_outline_send_every_eligible_body_character(self):
+        text = "x" * 18001
+        document = {"text": text, "metadata": {}, "sections": [{"id": "sec_results",
+            "heading": "Results", "section_type": "results", "text": text,
+            "start_offset": 0, "end_offset": len(text), "paragraphs": [], "provenance": {}}]}
+        outline_chunks, excluded = _outline_evidence_records(document)
+        profile_chunks = _retrieve_profile_evidence(document)
+        self.assertFalse(excluded)
+        self.assertGreater(len(outline_chunks), 1)
+        self.assertEqual("".join(item["text"] for item in outline_chunks), text)
+        self.assertEqual("".join(item["passages"][0]["quote"] for item in profile_chunks), text)
+
+    def test_full_text_chunks_must_reconstruct_exact_source_order(self):
+        first, second = "first source section\n\n", "second source section"
+        full_text = first + second
+        document = {"text": full_text, "metadata": {"source_kind": "markdown"}, "sections": [
+            {"id": "sec_1", "text": first}, {"id": "sec_2", "text": second}]}
+        chunks = _section_chunks(document, max_chars=8)
+        coverage = _verify_text_chunk_coverage(full_text, chunks, "test")
+        self.assertEqual(coverage["characters_submitted"], len(full_text))
+        self.assertTrue(coverage["all_mapped_text_submitted"])
+        with self.assertRaisesRegex(ValueError, "exactly cover"):
+            _verify_text_chunk_coverage(full_text, chunks[:-1], "test")
+
 
 class OutlinePersistenceTests(unittest.TestCase):
     def test_recursive_storage_remap_covers_arrays_and_paragraph_ids(self):
@@ -299,6 +338,7 @@ class OutlinePersistenceTests(unittest.TestCase):
             source_pdf = Path(directory) / "source.pdf"
             source_pdf.write_bytes(b"%PDF test artifact")
             identity = _pdf_artifact_identity(source_pdf)
+            _attach_valid_ollama_sidecar(mapping["metadata"], source_pdf)
             mapping.update({"source_pdf": source_pdf.name, "source_pdf_sha256": identity["sha256"],
                 "source_pdf_size_bytes": identity["size_bytes"]})
             path.write_text(json.dumps(mapping), encoding="utf-8")

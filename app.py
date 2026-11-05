@@ -35,8 +35,6 @@ _UI_OPEN_TASK = None
 _SAFFRON_START_TASK = None
 _SAFFRON_RETRY_LOCKS = {}
 _ATOMIC_STANCE_LOCKS = {}
-# Temporary UI focus switch. Set to False to restore the other analysis modules.
-ATOMIC_FOCUS_MODE = True
 _SAFFRON_RUNTIME_STATE = {"status": "disabled", "message": "SAFFRON is disabled."}
 _OPENALEX_BACKFILL_LOCK = threading.Lock()
 _OPENALEX_BACKFILL_STATE = {
@@ -51,7 +49,6 @@ def _analysis_paper_id(value):
     candidate = str(value or "").strip()
     return candidate if re.fullmatch(r"slrwork_[A-Za-z0-9_-]{1,200}", candidate) else ""
 
-
 def _valid_analysis_source(path):
     source = Path(path or "")
     if not source.is_file():
@@ -64,6 +61,34 @@ def _valid_analysis_source(path):
         except (OSError, UnicodeDecodeError):
             return False
     return False
+
+
+async def _run_atomic_stance_for_pdf(doi, provider, pdf_path, mapping=None, store=None):
+    path = Path(pdf_path or "")
+    if path.suffix.lower() != ".pdf" or not path.is_file():
+        raise ValueError("A saved PDF source is required for Stance & Engagement analysis.")
+    store = store or get_store()
+    lock = _ATOMIC_STANCE_LOCKS.setdefault(doi, asyncio.Lock())
+    async with lock:
+        from ai_analysis import _grobid_extract_pdf, _load_and_validate_fulltext_mapping
+        from atomic_stance import analyze_stance_engagement
+        if mapping is None:
+            mapping, _grobid_metadata = await asyncio.to_thread(_grobid_extract_pdf, path)
+        mapping_path = path.with_suffix(".fulltext.json")
+        current_mapping = await asyncio.to_thread(_load_and_validate_fulltext_mapping, mapping_path)
+        expected_hash = (mapping.get("metadata") or {}).get("pdf_artifact", {}).get("sha256")
+        current_hash = current_mapping.get("metadata", {}).get("pdf_artifact", {}).get("sha256")
+        if not expected_hash or current_hash != expected_hash:
+            raise ValueError("The source PDF changed before Stance & Engagement analysis began.")
+        result = await asyncio.to_thread(analyze_stance_engagement, mapping, provider)
+        current_mapping = await asyncio.to_thread(_load_and_validate_fulltext_mapping, mapping_path)
+        current_hash = current_mapping.get("metadata", {}).get("pdf_artifact", {}).get("sha256")
+        if current_hash != result.get("provenance", {}).get("source_pdf_sha256"):
+            raise ValueError("The source PDF changed during Stance & Engagement analysis.")
+        saved = await asyncio.to_thread(store.save_atomic_stance_analysis, doi, result)
+        if not saved:
+            raise ValueError("The paper source changed before Stance & Engagement results could be saved.")
+        return result
 
 
 async def _analysis_worker():
@@ -92,6 +117,14 @@ async def _analysis_worker():
                 analyzer, doi, paper["file_path"], provider, report_stage,
                 openalex_keywords=openalex_keywords,
             )
+            if Path(paper["file_path"]).suffix.lower() == ".pdf":
+                store.update_analysis_stage(doi, "stance_engagement")
+                try:
+                    await _run_atomic_stance_for_pdf(
+                        doi, provider, paper["file_path"], mapping=result.get("document"), store=store,
+                    )
+                except Exception as exc:
+                    print(f"[STANCE & ENGAGEMENT] Analysis unavailable for {doi}: {exc}")
             if settings.SAFFRON_ENABLED:
                 store.update_analysis_stage(doi, "saffron_term_taxonomy")
                 try:
@@ -253,6 +286,7 @@ async def require_slr_api_key_for_workspace(request: Request, call_next):
     is_workspace_page = request.method == "GET" and (
         path in {"/", "/upload", "/repository", "/analysis"}
         or path.startswith("/analysis/paper/")
+        or path.startswith("/analysis/processing/paper/")
     )
     if is_workspace_page:
         settings.refresh_api_credentials()
@@ -309,7 +343,7 @@ async def repository_page(request: Request):
 
 @app.get("/analysis", response_class=HTMLResponse)
 async def analysis_page(request: Request):
-    response = templates.TemplateResponse(request=request, name="analysis.html", context={"paper_detail_mode": False, "active_tab": "analysis", "vnu_configured": bool(settings.VNU_LIBRARY_ID and settings.VNU_LIBRARY_PASSWORD), "atomic_focus_mode": ATOMIC_FOCUS_MODE})
+    response = templates.TemplateResponse(request=request, name="analysis.html", context={"paper_detail_mode": False, "active_tab": "analysis", "vnu_configured": bool(settings.VNU_LIBRARY_ID and settings.VNU_LIBRARY_PASSWORD)})
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
     return response
 
@@ -332,7 +366,18 @@ async def paper_analysis_page(request: Request, doi: str):
     response = templates.TemplateResponse(request=request, name="analysis.html", context={
         "paper_detail_mode": True, "paper_id": normalized, "active_tab": "analysis",
         "vnu_configured": bool(settings.VNU_LIBRARY_ID and settings.VNU_LIBRARY_PASSWORD),
-        "atomic_focus_mode": ATOMIC_FOCUS_MODE,
+    })
+    response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+    return response
+
+
+@app.get("/analysis/processing/paper/{doi:path}", response_class=HTMLResponse)
+async def paper_analysis_processing_page(request: Request, doi: str):
+    normalized = _analysis_paper_id(doi)
+    if not normalized:
+        return HTMLResponse("Invalid paper identifier.", status_code=404)
+    response = templates.TemplateResponse(request=request, name="analysis_processing.html", context={
+        "paper_id": normalized,
     })
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
     return response
@@ -469,6 +514,7 @@ async def analysis_config():
         "default_provider": settings.AI_DEFAULT_PROVIDER if settings.AI_DEFAULT_PROVIDER in {"ollama", "gemini"} and (settings.AI_DEFAULT_PROVIDER != "gemini" or settings.GEMINI_API_KEY) else "ollama",
         "ollama_url": settings.OLLAMA_URL,
         "ollama_model": settings.OLLAMA_MODEL,
+        "pdf_extraction_ollama_model": settings.PDF_EXTRACTION_OLLAMA_MODEL,
         "gemini_model": settings.GEMINI_MODEL,
         "gemini_configured": bool(settings.GEMINI_API_KEY),
         "grobid_ready": grobid_ready,
@@ -488,6 +534,9 @@ async def update_analysis_config(request: Request):
     provider = str(data.get("default_provider") or "").strip().lower()
     ollama_url = str(data.get("ollama_url") or "").strip().rstrip("/")
     ollama_model = str(data.get("ollama_model") or "").strip()
+    pdf_extraction_ollama_model = str(
+        data.get("pdf_extraction_ollama_model") or settings.PDF_EXTRACTION_OLLAMA_MODEL
+    ).strip()
     gemini_model = str(data.get("gemini_model") or "").strip()
     api_key = str(data.get("gemini_api_key") or "").strip()
     clear_api_key = data.get("clear_gemini_key") is True
@@ -500,7 +549,9 @@ async def update_analysis_config(request: Request):
         return JSONResponse({"success": False, "error": "Enter a valid Ollama URL starting with http:// or https://."}, status_code=400)
     if parsed_url.scheme not in {"http", "https"} or not parsed_url.hostname or parsed_url.username or parsed_url.password or len(ollama_url) > 500:
         return JSONResponse({"success": False, "error": "Enter a valid Ollama URL starting with http:// or https://."}, status_code=400)
-    if not ollama_model or len(ollama_model) > 200 or not gemini_model or len(gemini_model) > 200:
+    if (not ollama_model or len(ollama_model) > 200 or
+            not pdf_extraction_ollama_model or len(pdf_extraction_ollama_model) > 200 or
+            not gemini_model or len(gemini_model) > 200):
         return JSONResponse({"success": False, "error": "Model names must be between 1 and 200 characters."}, status_code=400)
     if len(api_key) > 4096 or "\n" in api_key or "\r" in api_key:
         return JSONResponse({"success": False, "error": "The Gemini API key is invalid."}, status_code=400)
@@ -516,6 +567,7 @@ async def update_analysis_config(request: Request):
             ("AI_DEFAULT_PROVIDER", provider),
             ("OLLAMA_URL", ollama_url),
             ("OLLAMA_MODEL", ollama_model),
+            ("PDF_EXTRACTION_OLLAMA_MODEL", pdf_extraction_ollama_model),
             ("GEMINI_MODEL", gemini_model),
             ("GEMINI_API_KEY", next_api_key),
         ):
@@ -529,6 +581,7 @@ async def update_analysis_config(request: Request):
     settings.AI_DEFAULT_PROVIDER = provider
     settings.OLLAMA_URL = ollama_url
     settings.OLLAMA_MODEL = ollama_model
+    settings.PDF_EXTRACTION_OLLAMA_MODEL = pdf_extraction_ollama_model
     settings.GEMINI_MODEL = gemini_model
     settings.GEMINI_API_KEY = next_api_key
     return {
@@ -537,6 +590,7 @@ async def update_analysis_config(request: Request):
             "default_provider": provider,
             "ollama_url": ollama_url,
             "ollama_model": ollama_model,
+            "pdf_extraction_ollama_model": pdf_extraction_ollama_model,
             "gemini_model": gemini_model,
             "gemini_configured": bool(next_api_key),
         },
@@ -629,31 +683,17 @@ async def analyze_atomic_stance_engagement(doi: str, request: Request):
     if provider == "gemini" and not settings.GEMINI_API_KEY:
         return JSONResponse({"error": "GEMINI_API_KEY is not configured in .env."}, status_code=400)
 
-    lock = _ATOMIC_STANCE_LOCKS.setdefault(normalized, asyncio.Lock())
-    async with lock:
-        store = get_store()
-        paper = await asyncio.to_thread(store.get, normalized)
-        if not paper or paper.get("status") != "DOWNLOADED" or Path(paper.get("file_path") or "").suffix.lower() != ".pdf":
-            return JSONResponse({"error": "A saved PDF source is required for this analysis."}, status_code=409)
-        try:
-            from ai_analysis import _grobid_extract_pdf, _load_and_validate_fulltext_mapping
-            from atomic_stance import analyze_stance_engagement
-            mapping_path = Path(paper["file_path"]).with_suffix(".fulltext.json")
-            # Reuse a validated checkpoint or create one through GROBID only; do not run other AI modules.
-            mapping, _grobid_metadata = await asyncio.to_thread(_grobid_extract_pdf, Path(paper["file_path"]))
-            result = await asyncio.to_thread(analyze_stance_engagement, mapping, provider)
-            # Revalidate the current PDF after model work to prevent saving stale offsets.
-            current_mapping = await asyncio.to_thread(_load_and_validate_fulltext_mapping, mapping_path)
-            if current_mapping.get("metadata", {}).get("pdf_artifact", {}).get("sha256") != result["provenance"]["source_pdf_sha256"]:
-                return JSONResponse({"error": "The source PDF changed during analysis. Run the analysis again."}, status_code=409)
-            saved = await asyncio.to_thread(store.save_atomic_stance_analysis, normalized, result)
-        except ValueError as exc:
-            return JSONResponse({"error": str(exc)}, status_code=409)
-        except Exception as exc:
-            return JSONResponse({"error": str(exc)[:500]}, status_code=502)
-        if not saved:
-            return JSONResponse({"error": "The paper source changed before Atomic results could be saved. Reload and run again."}, status_code=409)
-        return {"success": True, "result": result}
+    store = get_store()
+    paper = await asyncio.to_thread(store.get, normalized)
+    if not paper or paper.get("status") != "DOWNLOADED" or Path(paper.get("file_path") or "").suffix.lower() != ".pdf":
+        return JSONResponse({"error": "A saved PDF source is required for this analysis."}, status_code=409)
+    try:
+        result = await _run_atomic_stance_for_pdf(normalized, provider, paper["file_path"], store=store)
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=409)
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)[:500]}, status_code=502)
+    return {"success": True, "result": result}
 
 
 @app.post("/api/analysis/saffron/retry")

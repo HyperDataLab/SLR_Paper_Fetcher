@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from ai_analysis import _provider_json
 
 
-PROMPT_VERSION = "atomic-stance-engagement-rrr-v3"
+PROMPT_VERSION = "atomic-stance-engagement-rrr-v4"
 WORD_COUNT_VERSION = "unicode-word-token-v1"
 CHUNK_CHARACTERS = 7000
 
@@ -91,7 +91,11 @@ def _review_prompt(text: str, chunk_start: int, chunk_index: int, chunk_count: i
     definitions = "\n".join(f"- {item['id']}: {item['definition']}" for item in CATEGORY_BY_ID.values())
     return f"""You are annotating one source-text segment for stance and engagement, following Hyland (2005).
 Method: Review–Revise–Reframe (RRR). This is the REVIEW pass.
-Find explicit, contextually functional instances in the supplied text. Do not infer counts or report aggregate numbers.
+Find explicit, contextually functional instances in the supplied text. Review each of the nine categories below separately;
+do not stop after finding stance markers. In particular, actively check for reader-directed imperatives such as
+"Consider the optimization problem", "Note that...", and "See Table/Figure/Section...". Count these as Directives when
+they guide the reader's attention or interpretation. Do not count "should" or "must" when they only describe a system,
+method, or study procedure. Do not infer counts or report aggregate numbers.
 For every item return exactly one category, the exact verbatim marker as "quote", and an exact contiguous source excerpt as
 "evidence_span" that contains the marker and enough surrounding words to establish its function. Keep quote to the smallest
 functional marker: normally one word or a conventional multiword marker. Do not include a subject plus reporting verb (for
@@ -123,7 +127,9 @@ category's function in this context, and (3) it is not a duplicate or a differen
 particular, reject "We note" as an Attitude Marker: authorial "We" is Self Mention, while "note" is not automatically an
 attitude marker. Reject technical performance descriptions such as "enhanced", "significant", "minimal", "better", or
 "competitive" as Attitude Markers unless the wording clearly expresses the writer's evaluation rather than reporting a
-measured property. Reject nonfunctional mentions, quotations about the category itself, reference-list matches and ambiguous
+measured property. Accept a reader-facing imperative such as "Consider the optimization problem" as a Directive when it
+guides the reader's attention or interpretation; reject "should"/"must" when they only describe system behavior or study
+procedures. Reject nonfunctional mentions, quotations about the category itself, reference-list matches and ambiguous
 excerpts. Do not create candidates or change quote/evidence spans. You may correct the category only when the exact quoted
 marker itself clearly performs another listed category; reject bundled phrases that include non-marker words. Return one
 decision per candidate index.
@@ -142,12 +148,16 @@ def analyze_stance_engagement(mapping: dict, provider: str) -> dict:
         raise ValueError("A complete source text mapping is required for stance and engagement analysis.")
     completeness = mapping.get("metadata", {}).get("completeness")
     if completeness != "full_text_candidate":
-        raise ValueError("Stance and engagement analysis requires a complete GROBID full-text mapping.")
+        raise ValueError("Stance and engagement analysis requires a complete, validated PDF text mapping.")
 
     chunks = list(_chunks(text))
+    reconstructed_text = "".join(chunk for _, _, chunk in chunks)
+    if reconstructed_text != text:
+        raise ValueError("Stance and engagement chunks do not exactly cover the verified source text in order.")
     accepted = []
     rejected = []
     model_name = ""
+    analyzed_chunk_count = 0
     for chunk_index, (global_start, global_end, chunk) in enumerate(chunks, 1):
         reviewed, model_name = _provider_json(_review_prompt(chunk, global_start, chunk_index, len(chunks)), REVIEW_SCHEMA, provider)
         candidates = []
@@ -177,6 +187,7 @@ def analyze_stance_engagement(mapping: dict, provider: str) -> dict:
                 "start": start, "end": end})
 
         if not candidates:
+            analyzed_chunk_count += 1
             continue
         revised, model_name = _provider_json(_revise_prompt(chunk, candidates, chunk_index, len(chunks)), REVISE_SCHEMA, provider)
         decisions = {}
@@ -208,6 +219,7 @@ def analyze_stance_engagement(mapping: dict, provider: str) -> dict:
                 "category": category, "quote": candidate["quote"], "context": candidate["evidence_span"],
                 "start_offset": start, "end_offset": end, "section_id": section_id, "page": page,
             })
+        analyzed_chunk_count += 1
 
     if not model_name:
         raise RuntimeError("The AI provider returned no model identity for this run.")
@@ -251,6 +263,15 @@ def analyze_stance_engagement(mapping: dict, provider: str) -> dict:
             "source_pdf_sha256": source_checksum,
             "mapping_schema_version": mapping.get("mapping_schema_version"),
             "mapping_character_count": len(text),
+            "input_coverage": {
+                "chunk_count": len(chunks),
+                "chunks_successfully_analyzed": analyzed_chunk_count,
+                "characters_submitted": len(reconstructed_text),
+                "full_text_characters": len(text),
+                "coverage_percent": 100.0,
+                "all_mapped_text_submitted": True,
+                "all_chunks_successfully_analyzed": analyzed_chunk_count == len(chunks),
+            },
             "word_count": word_count,
             "word_count_version": WORD_COUNT_VERSION,
             "rate_unit": "accepted cue occurrences per 1,000 source words",

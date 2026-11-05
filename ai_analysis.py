@@ -20,6 +20,7 @@ from lxml import etree
 
 from config import settings
 from paper_io import normalize_doi, valid_pdf_file
+from pdf_extraction import extract_pdf_to_markdown
 
 
 PROMPT_VERSIONS = {
@@ -112,7 +113,7 @@ def empty_mvp3_payload():
             "rubric_anchors": MVP3_RUBRIC_ANCHORS,
             "benchmark": {"reviewer_count": 0, "ready": False, "dimensions": {}},
             "provenance": None, "stale": False}
-FULLTEXT_MAPPING_SCHEMA_VERSION = 2
+FULLTEXT_MAPPING_SCHEMA_VERSION = 3
 FULLTEXT_ANALYSIS_CHUNK_CHARS = 12000
 PAPER_PROFILE_SCHEMA_VERSION = 3
 PROFILE_KEYWORD_STOPWORDS = {"a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "in", "is",
@@ -468,13 +469,84 @@ def _extract_tei(tei: bytes) -> tuple[str, dict]:
     return document["text"], metadata
 
 
+def _markdown_pdf_document(markdown: str, metadata: dict) -> dict:
+    """Build stable section and paragraph offsets over the exact Ollama Markdown."""
+    heading_matches = list(re.finditer(r"(?m)^#{1,6}[ \t]+[^\r\n]+", markdown))
+    starts = [0, *(match.start() for match in heading_matches if match.start() > 0)]
+    starts = sorted(set(starts))
+    sections, structure = [], []
+    full_text_parts = []
+    cursor = 0
+    for index, start in enumerate(starts):
+        end = starts[index + 1] if index + 1 < len(starts) else len(markdown)
+        text = markdown[start:end].strip("\r\n")
+        if not text:
+            continue
+        heading_match = re.match(r"#{1,6}[ \t]+([^\r\n]+)", text)
+        heading = heading_match.group(1).strip() if heading_match else ("Introduction" if heading_matches and index == 0 else "")
+        section_id = f"ollama_sec_{len(sections) + 1:04d}"
+        structure_id = f"ollama_structure_{len(structure) + 1:04d}"
+        if sections:
+            cursor += 2
+        section_start = cursor
+        full_text_parts.append(text)
+        paragraph_pattern = re.compile(r"(?m)\S(?:[^\r\n]*\r?\n(?![ \t]*\r?\n)[^\r\n]*)*")
+        paragraphs = []
+        for paragraph_index, match in enumerate(paragraph_pattern.finditer(text), 1):
+            paragraph_start = section_start + match.start()
+            paragraph_end = section_start + match.end()
+            paragraphs.append({"id": f"ollama_p_{len(sections) + 1:04d}_{paragraph_index:03d}",
+                "text": text[match.start():match.end()], "start_offset": paragraph_start,
+                "end_offset": paragraph_end, "page": None})
+        page_spans = []
+        page_matches = list(re.finditer(r"<!-- PDF_PAGE:(\d+) -->", text))
+        for page_index, page_match in enumerate(page_matches):
+            span_start = section_start + page_match.start()
+            span_end = section_start + (page_matches[page_index + 1].start() if page_index + 1 < len(page_matches) else len(text))
+            page_spans.append({"start": page_match.start(), "end": span_end - section_start,
+                               "page": int(page_match.group(1))})
+        sections.append({"id": section_id, "section_type": _section_type(heading), "heading": heading,
+            "text": text, "start_offset": section_start, "end_offset": section_start + len(text),
+            "parent_section_id": None, "parent_structure_id": None, "structure_id": structure_id,
+            "depth": 1, "heading_source": "ollama_pdf_markdown", "structural_kind": "body",
+            "ordinal": len(sections) + 1, "paragraphs": paragraphs, "page": None,
+            "confidence": None, "provenance": {"source": "ollama_pdf_markdown", "page_spans": page_spans}})
+        structure.append({"id": structure_id, "section_id": section_id, "parent_structure_id": None,
+            "order": len(structure) + 1, "depth": 1, "heading": heading,
+            "heading_source": "ollama_pdf_markdown", "hierarchy_status": "verified", "structural_kind": "body"})
+        cursor += len(text)
+    full_text = "\n\n".join(full_text_parts)
+    if not sections or not full_text.strip():
+        raise ValueError("Ollama returned no analyzable Markdown text for this PDF.")
+    body_characters = sum(len(section["text"]) for section in sections)
+    completeness = "full_text_candidate" if body_characters >= 1000 else "partial_text"
+    extraction_quality = metadata.get("extraction_quality") or {}
+    warning = None
+    if completeness != "full_text_candidate":
+        warning = "The extracted text is shorter than the minimum full-text candidate threshold."
+    elif extraction_quality.get("low_coverage_pages"):
+        warning = "Low text-layer overlap on PDF pages: " + ", ".join(map(str, extraction_quality["low_coverage_pages"])) + ". Review those pages against the PDF."
+    elif extraction_quality.get("pages_without_native_text"):
+        warning = "Some pages have no native PDF text layer and depend on vision OCR: " + ", ".join(map(str, extraction_quality["pages_without_native_text"])) + ". Review OCR output against the PDF."
+    elif extraction_quality.get("warning"):
+        warning = extraction_quality["warning"]
+    return {"sections": sections, "structure": structure, "text": full_text,
+        "metadata": {**metadata, "completeness": completeness, "body_characters": body_characters,
+            "completeness_warning": warning}}
+
+
 def _grobid_extract(pdf_path: Path) -> tuple[dict, dict]:
     if not valid_pdf_file(pdf_path):
         raise ValueError("The PDF is missing or invalid.")
     endpoint = f"{settings.GROBID_URL}/api/processFulltextDocument"
-    with pdf_path.open("rb") as pdf:
-        response = requests.post(endpoint, files={"input": (pdf_path.name, pdf, "application/pdf")},
-                                 data={"consolidateHeader": "1", "includeRawCitations": "0"}, timeout=(10, 300))
+    try:
+        with pdf_path.open("rb") as pdf:
+            response = requests.post(endpoint, files={"input": (pdf_path.name, pdf, "application/pdf")},
+                                     data={"consolidateHeader": "1", "includeRawCitations": "0"}, timeout=(10, 300))
+    except requests.exceptions.ConnectionError as exc:
+        raise RuntimeError(
+            f"Cannot connect to GROBID at {settings.GROBID_URL}. Start the GROBID service or correct GROBID_URL, then retry."
+        ) from exc
     if response.status_code != 200:
         raise RuntimeError(f"GROBID returned HTTP {response.status_code}.")
     return _extract_tei_document(response.content)
@@ -545,26 +617,38 @@ def _load_and_validate_fulltext_mapping(path: Path) -> dict:
     try:
         mapping = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
-        raise ValueError(f"GROBID full-text mapping JSON could not be read: {exc}") from exc
+        raise ValueError(f"Full-text mapping JSON could not be read: {exc}") from exc
     if not isinstance(mapping, dict):
-        raise ValueError("GROBID full-text mapping JSON must contain a JSON object.")
+        raise ValueError("Full-text mapping JSON must contain a JSON object.")
     if mapping.get("schema_version") != FULLTEXT_MAPPING_SCHEMA_VERSION:
-        raise ValueError("GROBID full-text mapping JSON has an unsupported schema version.")
+        raise ValueError("Full-text mapping JSON has an unsupported schema version.")
     source_pdf = mapping.get("source_pdf")
     source_pdf_path = path.parent / str(source_pdf or "")
     if not source_pdf or not source_pdf_path.is_file():
-        raise ValueError("GROBID full-text mapping JSON does not identify an available source PDF.")
+        raise ValueError("Full-text mapping JSON does not identify an available source PDF.")
     pdf_identity = _pdf_artifact_identity(source_pdf_path)
     if (pdf_identity["sha256"] != mapping.get("source_pdf_sha256") or
             pdf_identity["size_bytes"] != mapping.get("source_pdf_size_bytes")):
         raise ValueError("The source PDF changed after its GROBID mapping was created.")
+    metadata = mapping.get("metadata") or {}
+    extraction_artifacts = metadata.get("extraction_artifacts") or {}
+    if Path(str(source_pdf)).suffix.lower() == ".pdf" and extraction_artifacts.get("engine") != "ollama_vision_api":
+        raise ValueError("PDF full-text mapping was not created by the configured Ollama vision extractor; regenerate it.")
+    if extraction_artifacts.get("engine") == "ollama_vision_api":
+        markdown_name = extraction_artifacts.get("markdown_file")
+        markdown_path = path.parent / str(markdown_name or "")
+        if not markdown_name or not markdown_path.is_file():
+            raise ValueError("The Ollama Markdown sidecar is missing; regenerate the PDF extraction.")
+        digest = hashlib.sha256(markdown_path.read_bytes()).hexdigest()
+        if digest != extraction_artifacts.get("markdown_sha256"):
+            raise ValueError("The Ollama Markdown sidecar changed after its full-text mapping was created.")
     full_text = mapping.get("full_text")
     sections = mapping.get("sections")
     if not isinstance(full_text, str) or not full_text.strip() or not isinstance(sections, list) or not sections:
-        raise ValueError("GROBID full-text mapping JSON is empty or has no mapped sections.")
+        raise ValueError("Full-text mapping JSON is empty or has no mapped sections.")
     rebuilt = "\n\n".join(str(section.get("text") or "") for section in sections)
     if rebuilt != full_text or len(full_text) != mapping.get("full_text_characters"):
-        raise ValueError("GROBID full-text mapping JSON failed full-text coverage validation.")
+        raise ValueError("Full-text mapping JSON failed section reconstruction validation.")
     document_sections = []
     seen_ids = set()
     for section in sections:
@@ -574,11 +658,11 @@ def _load_and_validate_fulltext_mapping(path: Path) -> dict:
         if (not section_id or section_id in seen_ids or not isinstance(start, int) or not isinstance(end, int)
                 or start < 0 or end > len(full_text) or end < start
                 or not isinstance(text, str) or end - start != len(text) or full_text[start:end] != text):
-            raise ValueError("GROBID full-text mapping JSON contains an invalid section/source offset mapping.")
+            raise ValueError("Full-text mapping JSON contains an invalid section/source offset mapping.")
         seen_ids.add(section_id)
         paragraphs = section.get("paragraphs", [])
         if not isinstance(paragraphs, list):
-            raise ValueError("GROBID full-text mapping JSON contains invalid paragraph mappings.")
+            raise ValueError("Full-text mapping JSON contains invalid paragraph mappings.")
         paragraph_ids = set()
         for paragraph in paragraphs:
             paragraph_id = paragraph.get("id")
@@ -589,7 +673,7 @@ def _load_and_validate_fulltext_mapping(path: Path) -> dict:
                     or paragraph_start < start or paragraph_end > end or paragraph_end < paragraph_start
                     or paragraph_end - paragraph_start != len(paragraph_text)
                     or full_text[paragraph_start:paragraph_end] != paragraph_text):
-                raise ValueError("GROBID full-text mapping JSON contains an invalid paragraph/source offset mapping.")
+                raise ValueError("Full-text mapping JSON contains an invalid paragraph/source offset mapping.")
             paragraph_ids.add(paragraph_id)
         document_sections.append({"id": section_id, "section_type": section.get("section_type", "other"),
             "heading": section.get("heading", ""), "text": text, "start_offset": start,
@@ -615,14 +699,14 @@ def _load_and_validate_fulltext_mapping(path: Path) -> dict:
         parent_id = node.get("parent_structure_id")
         if (not node_id or node_id in structure_ids or (parent_id and parent_id not in structure_ids)
                 or (node.get("section_id") and node["section_id"] not in section_ids)):
-            raise ValueError("GROBID full-text mapping JSON contains an invalid structural outline hierarchy.")
+            raise ValueError("Full-text mapping JSON contains an invalid structural outline hierarchy.")
         structure_ids.add(node_id)
         node.setdefault("hierarchy_status", "verified" if not parent_id or parent_id in structure_ids else "unresolved")
-    completeness = (mapping.get("metadata") or {}).get("completeness")
+    completeness = metadata.get("completeness")
     if completeness != "full_text_candidate":
-        raise ValueError("GROBID returned partial or abstract-only text; AI analysis stopped. Re-extract the paper and check the GROBID result.")
+        raise ValueError("The PDF extraction returned partial or abstract-only text; AI analysis stopped. Re-extract the paper and review the extraction warning.")
     return {"sections": document_sections, "structure": structure, "text": full_text,
-            "metadata": {**(mapping.get("metadata") or {}), "pdf_artifact": pdf_identity},
+            "metadata": {**metadata, "pdf_artifact": pdf_identity},
             "mapping_file": str(path), "mapping_schema_version": mapping["schema_version"],
             "mapping_section_count": len(document_sections), "mapping_character_count": len(full_text)}
 
@@ -861,9 +945,14 @@ def _read_pdf_pages(pdf_path, identity=None):
     if _pdf_artifact_identity(path)["sha256"] != identity.get("sha256"):
         raise ValueError("The PDF changed while its text was being read.")
     pages = _read_pdf_pages_cached(str(path.resolve()), identity["sha256"])
-    if not any(text.strip() for _, text in pages):
-        raise ValueError("The PDF has no extractable text layer for source verification.")
     return pages
+
+
+def _try_read_pdf_pages(pdf_path, identity=None):
+    try:
+        return _read_pdf_pages(pdf_path, identity), None
+    except Exception as exc:
+        return (), str(exc)[:300]
 
 
 def _normalized_text_map(text):
@@ -962,13 +1051,21 @@ def _section_chunks(document, max_chars=12000):
     return chunks
 
 
+def _verify_text_chunk_coverage(full_text: str, chunks: list[dict], label: str) -> dict:
+    """Require the submitted chunk sequence to reproduce the mapped source exactly."""
+    reconstructed = "".join(str(chunk.get("text") or "") for chunk in chunks)
+    if reconstructed != full_text:
+        raise ValueError(f"{label} chunks do not exactly cover the verified full text in source order.")
+    return {"chunk_count": len(chunks), "characters_submitted": len(reconstructed),
+            "full_text_characters": len(full_text), "coverage_percent": 100.0,
+            "all_mapped_text_submitted": True}
+
+
 def _analyze_review_draft(doi: str, metadata: dict, document: dict, provider: str) -> tuple[dict, str, dict]:
     chunks = _section_chunks(document, max_chars=FULLTEXT_ANALYSIS_CHUNK_CHARS)
     if not chunks:
-        raise ValueError("The verified GROBID full-text mapping contains no analyzable text.")
-    submitted_characters = sum(len(chunk["text"]) for chunk in chunks)
-    if submitted_characters != len(document["text"]):
-        raise ValueError("AI input chunks do not cover every character in the verified full text.")
+        raise ValueError("The verified full-text mapping contains no analyzable text.")
+    coverage = _verify_text_chunk_coverage(document["text"], chunks, "Full-text analysis")
     part_drafts, model = [], ""
     for index, chunk in enumerate(chunks, 1):
         draft, model = _provider_json(_analysis_prompt(doi, metadata, chunk, index, len(chunks)), ANALYSIS_SCHEMA, provider)
@@ -978,9 +1075,9 @@ def _analyze_review_draft(doi: str, metadata: dict, document: dict, provider: st
     else:
         result, model = _provider_json(_analysis_synthesis_prompt(doi, metadata, part_drafts), ANALYSIS_SCHEMA, provider)
         result = {key: str(result.get(key) or "") for key in ANALYSIS_SCHEMA["properties"]}
-    coverage = {"chunk_count": len(chunks), "characters_submitted": submitted_characters,
-                "full_text_characters": len(document["text"]),
-                "all_mapped_text_submitted": True, "synthesized": len(chunks) > 1}
+    coverage.update({"chunks_successfully_analyzed": len(part_drafts),
+                     "all_chunks_successfully_analyzed": len(part_drafts) == len(chunks),
+                     "synthesized": len(chunks) > 1})
     return result, model, coverage
 
 
@@ -1000,42 +1097,19 @@ def _profile_source_reference(section: dict, quote: str) -> dict | None:
             "end_offset": section["start_offset"] + end, "page": page}
 
 
-def _retrieve_profile_evidence(document: dict, propositions: list[dict]) -> list[dict]:
-    """Retrieve bounded, source-addressable passages for RRR profile analysis."""
-    propositions_by_section = {}
-    for proposition in propositions:
-        if proposition.get("section_id") and proposition.get("source_quote"):
-            propositions_by_section.setdefault(proposition["section_id"], []).append(proposition)
+def _retrieve_profile_evidence(document: dict) -> list[dict]:
+    """Feed every eligible body-text chunk to keyword/style analysis with source anchors."""
+    chunks, _excluded_ids = _outline_evidence_records(document)
+    section_by_id = {section["id"]: section for section in document.get("sections", [])}
     records = []
-    style_markers = re.compile(r"\b(?:may|might|could|suggests?|indicates?|however|therefore|moreover|we|our)\b", re.I)
-    for section in document.get("sections", []):
-        text = section.get("text") or ""
-        sentences = [part.strip() for part in re.split(r"(?<=[.!?])\s+|\n+", text) if part.strip()]
-        selected = []
-        if sentences:
-            selected.extend(sentences[:2])
-            selected.extend(sentences[-2:])
-            selected.append(max(sentences, key=len))
-            selected.extend(sentence for sentence in sentences if style_markers.search(sentence))
-        section_props = sorted(propositions_by_section.get(section["id"], []),
-            key=lambda item: (item.get("proposition_type") not in {"objective", "finding", "conclusion", "limitation"},
-                              -(item.get("confidence") or 0)))
-        selected.extend(item["source_quote"] for item in section_props[:3])
-        passages, seen = [], set()
-        for quote in selected:
-            quote = quote[:500]
-            key = " ".join(quote.casefold().split())
-            if not quote or key in seen:
-                continue
-            reference = _profile_source_reference(section, quote)
-            if not reference:
-                continue
-            seen.add(key)
-            passages.append(reference)
-            if len(passages) >= 8:
-                break
-        records.append({"section_id": section["id"], "section_type": section.get("section_type", "other"),
-                        "heading": section.get("heading", ""), "passages": passages})
+    for chunk in chunks:
+        section = section_by_id[chunk["section_id"]]
+        reference = {"section_id": chunk["section_id"], "paragraph_ids": chunk["paragraph_ids"],
+            "quote": chunk["text"], "start_offset": chunk["start_offset"],
+            "end_offset": chunk["end_offset"], "page": chunk.get("page")}
+        records.append({"chunk_id": chunk["chunk_id"], "section_id": section["id"],
+            "section_type": section.get("section_type", "other"), "heading": section.get("heading", ""),
+            "passages": [reference]})
     return records
 
 
@@ -1062,25 +1136,45 @@ def _outline_evidence_records(document: dict, chunk_characters=8000) -> tuple[li
             quote = text[start:end].strip()
             if quote:
                 chunk_index += 1
-                reference = _profile_source_reference(section, quote)
-                if reference:
-                    local_start = reference["start_offset"] - section["start_offset"]
-                    local_end = reference["end_offset"] - section["start_offset"]
-                    paragraph_ids = [item["id"] for item in section.get("paragraphs", [])
-                                     if item.get("start_offset", 0) < reference["end_offset"]
-                                     and item.get("end_offset", 0) > reference["start_offset"]]
-                    records.append({"chunk_id": f"{section['id']}:chunk_{chunk_index:04d}",
-                        "section_id": section["id"], "paragraph_ids": paragraph_ids,
-                        "section_type": section.get("section_type", "other"),
-                        "heading": heading, "parent_section_id": section.get("parent_section_id"),
-                        "structure_id": section.get("structure_id"),
-                        "parent_structure_id": section.get("parent_structure_id"),
-                        "heading_source": section.get("heading_source", "unknown"),
-                        "depth": section.get("depth", 1), "chunk_index": chunk_index,
-                        "chunk_start": local_start, "chunk_end": local_end, "text": quote,
-                        "start_offset": reference["start_offset"], "end_offset": reference["end_offset"],
-                        "page": reference.get("page")})
+                raw_chunk = text[start:end]
+                local_start = start + len(raw_chunk) - len(raw_chunk.lstrip())
+                local_end = local_start + len(quote)
+                absolute_start, absolute_end = section["start_offset"] + local_start, section["start_offset"] + local_end
+                page = next((item.get("page") for item in section.get("provenance", {}).get("page_spans", [])
+                             if item.get("start", 0) <= local_start < item.get("end", 0)), section.get("page"))
+                paragraph_ids = [item["id"] for item in section.get("paragraphs", [])
+                                 if item.get("start_offset", 0) < absolute_end
+                                 and item.get("end_offset", 0) > absolute_start]
+                records.append({"chunk_id": f"{section['id']}:chunk_{chunk_index:04d}",
+                    "section_id": section["id"], "paragraph_ids": paragraph_ids,
+                    "section_type": section.get("section_type", "other"),
+                    "heading": heading, "parent_section_id": section.get("parent_section_id"),
+                    "structure_id": section.get("structure_id"),
+                    "parent_structure_id": section.get("parent_structure_id"),
+                    "heading_source": section.get("heading_source", "unknown"),
+                    "depth": section.get("depth", 1), "chunk_index": chunk_index,
+                    "chunk_start": local_start, "chunk_end": local_end, "text": quote,
+                    "start_offset": absolute_start, "end_offset": absolute_end, "page": page})
             start = max(end, start + 1)
+    # Every non-whitespace source character in eligible body sections must be
+    # covered by at least one exact, source-anchored chunk.
+    records_by_section = {}
+    for record in records:
+        records_by_section.setdefault(record["section_id"], []).append(
+            (record["chunk_start"], record["chunk_end"]))
+    for section in document.get("sections", []):
+        if section["id"] in excluded_ids:
+            continue
+        intervals = sorted(records_by_section.get(section["id"], []))
+        interval_index = 0
+        text = section.get("text") or ""
+        for offset, character in enumerate(text):
+            while interval_index < len(intervals) and intervals[interval_index][1] <= offset:
+                interval_index += 1
+            if (not character.isspace()
+                    and (interval_index >= len(intervals)
+                         or not intervals[interval_index][0] <= offset < intervals[interval_index][1])):
+                raise ValueError(f"Outline chunks omit source content from section {section['id']}.")
     totals = {}
     for record in records:
         totals[record["section_id"]] = totals.get(record["section_id"], 0) + 1
@@ -1413,7 +1507,7 @@ def _has_reported_profile_keywords(openalex_keywords, author_keywords, grobid_ke
 
 
 def _analyze_paper_profile(document: dict, propositions: list[dict], provider: str) -> dict:
-    evidence_records = _retrieve_profile_evidence(document, propositions)
+    evidence_records = _retrieve_profile_evidence(document)
     batches = _profile_batches(evidence_records)
     outline_evidence_records, excluded_outline_ids = _outline_evidence_records(document)
     outline_batches = _profile_batches(outline_evidence_records)
@@ -1427,8 +1521,9 @@ def _analyze_paper_profile(document: dict, propositions: list[dict], provider: s
     grobid_keyword_inputs = document_metadata.get("grobid_keywords", [])
     source_keywords_available = _has_reported_profile_keywords(
         openalex_keyword_inputs, author_keyword_inputs, grobid_keyword_inputs)
-    retrieved_passages = {item["section_id"]: item.get("passages", [])
-                        for item in evidence_records}
+    retrieved_passages = {}
+    for item in evidence_records:
+        retrieved_passages.setdefault(item["section_id"], []).extend(item.get("passages", []))
 
     def validated_retrieved_reference(section_id, quote):
         section = section_by_id.get(str(section_id or ""))
@@ -1745,10 +1840,20 @@ Return JSON matching the schema. Source chunks:\n{json.dumps(batch, ensure_ascii
         "outline_layers": outline_layers, "outline_quality": outline_quality,
         "outline_processing": {"chunk_count": len(outline_evidence_records),
             "processed_chunk_ids": sorted(processed_outline_chunk_ids), "failed_chunks": failed_outline_chunks,
-            "unprocessed_paragraph_ids": unprocessed_paragraph_ids},
+            "unprocessed_paragraph_ids": unprocessed_paragraph_ids,
+            "eligible_content_characters_submitted": sum(len(item["text"]) for item in outline_evidence_records
+                if item.get("chunk_id") in processed_outline_chunk_ids),
+            "eligible_content_characters_chunked": sum(len(item["text"]) for item in outline_evidence_records),
+            "all_eligible_content_chunks_processed": len(processed_outline_chunk_ids) == len(outline_evidence_records)
+                and not failed_outline_chunks,
+            "excluded_noncontent_section_ids": sorted(excluded_outline_ids)},
         "writing_style": {"metrics": _paper_style_metrics(document.get("text", "")), "observations": style_outputs},
-        "retrieval": {"section_count": len(evidence_records), "passage_count": sum(len(item["passages"]) for item in evidence_records),
+        "retrieval": {"section_count": len({item["section_id"] for item in evidence_records}),
+                      "passage_count": sum(len(item["passages"]) for item in evidence_records),
                       "batch_count": len(batches), "outline_chunk_count": len(outline_evidence_records),
+                      "profile_input_characters_chunked": sum(len(item["passages"][0]["quote"]) for item in evidence_records),
+                      "profile_input_chunk_count": len(evidence_records),
+                      "profile_input_all_chunks_submitted": True,
                       "outline_full_text_characters": sum(len(item["text"]) for item in outline_evidence_records),
                       "outline_excluded_noncontent_sections": len(excluded_outline_ids)},
         "validation": {"accepted_items": accepted_count, "rejected_items": rejected_count,
@@ -1777,6 +1882,7 @@ def _normalize_proposition_output(item):
 def _extract_propositions(document, provider, model, pdf_pages=None, pdf_artifact=None):
     markdown_source = document.get("metadata", {}).get("source_kind") == "markdown"
     chunks = _section_chunks(document)
+    coverage = _verify_text_chunk_coverage(document.get("text", ""), chunks, "Proposition extraction")
     propositions, rejected, index = [], [], 0
     section_map = {}
     for chunk_index, chunk in enumerate(chunks, 1):
@@ -1824,7 +1930,8 @@ def _extract_propositions(document, provider, model, pdf_pages=None, pdf_artifac
                        if markdown_source else {"pdf_anchor": {"page": pdf_anchor["page"], "start_offset": pdf_anchor["start_offset"],
                         "end_offset": pdf_anchor["end_offset"], "pdf_sha256": (pdf_artifact or {}).get("sha256")}}),
                     "model": model, "prompt_version": PROMPT_VERSIONS["scientific_proposition_extraction"]}})
-    return propositions, rejected, model
+    coverage.update({"chunks_successfully_analyzed": len(chunks), "all_chunks_successfully_analyzed": True})
+    return propositions, rejected, model, coverage
 
 
 def _roles_prompt(propositions):
@@ -3222,7 +3329,38 @@ def _grobid_extract_pdf(pdf_path):
             # Old, corrupt, or stale checkpoints are replaced by a fresh GROBID extraction.
             pass
 
-    document, metadata = _grobid_extract(pdf_path)
+    native_pdf_pages, native_text_error = _try_read_pdf_pages(pdf_path, pdf_artifact)
+    grobid_document = grobid_metadata = None
+    grobid_error = None
+    try:
+        grobid_document, grobid_metadata = _grobid_extract(pdf_path)
+    except Exception as exc:
+        grobid_error = str(exc)[:400]
+
+    try:
+        extraction = extract_pdf_to_markdown(pdf_path, native_pdf_pages)
+    except Exception as exc:
+        raise RuntimeError(
+            "PDF-to-Markdown extraction through the Ollama vision API failed; no local AI extractor was used. "
+            f"{str(exc)[:500]}"
+        ) from exc
+
+    metadata = dict((grobid_document or {}).get("metadata") or grobid_metadata or {})
+    quality = dict(extraction["coverage"])
+    quality["native_text_layer_error"] = native_text_error
+    if grobid_error:
+        quality["grobid_metadata_error"] = grobid_error
+    if native_text_error and not quality.get("warning"):
+        quality["warning"] = "The PDF text layer could not be read for overlap checking; review the Markdown against the source PDF."
+    metadata["extraction_quality"] = quality
+    metadata["extraction_artifacts"] = {
+        "engine": "ollama_vision_api",
+        "markdown_file": extraction["markdown_path"].name,
+        "markdown_sha256": hashlib.sha256(extraction["markdown_path"].read_bytes()).hexdigest(),
+    }
+    document = _markdown_pdf_document(extraction["markdown"], metadata)
+    document["metadata"].update({key: value for key, value in metadata.items() if key not in document["metadata"]})
+
     mapping_path = _write_fulltext_mapping(pdf_path, document, pdf_artifact)
     verified_document = _load_and_validate_fulltext_mapping(mapping_path)
     if _pdf_artifact_identity(pdf_path)["sha256"] != pdf_artifact["sha256"]:
@@ -3242,7 +3380,8 @@ def _run_argument_analysis(doi, document, provider, stage_callback=None, pdf_pag
     stage_callback = stage_callback or (lambda _stage: None)
     stage_callback("proposition_extraction")
     pdf_artifact = document.get("metadata", {}).get("pdf_artifact") or {}
-    propositions, extraction_rejected, model = _extract_propositions(document, provider, "", pdf_pages, pdf_artifact)
+    propositions, extraction_rejected, model, proposition_coverage = _extract_propositions(
+        document, provider, "", pdf_pages, pdf_artifact)
     for proposition in propositions:
         proposition["paper_id"] = doi
     stage_callback("argument_role_analysis")
@@ -3255,6 +3394,7 @@ def _run_argument_analysis(doi, document, provider, stage_callback=None, pdf_pag
     stage_callback("graph_validation")
     graph, validation = build_aif_graph(propositions, relations, analysis_payload)
     validation["rejected_model_outputs"] = extraction_rejected + relation_rejected
+    validation["proposition_input_coverage"] = proposition_coverage
     source_propositions = [item for item in propositions if _assertion_origin(item) == "source"]
     validation["component_text_policy"] = "verbatim_verified_source_spans_only"
     validation["source_component_count"] = len(source_propositions)
@@ -3286,7 +3426,7 @@ def analyze_pdf(doi: str, pdf_path: str, provider: str, stage_callback=None, ope
     if stage_callback:
         stage_callback("fulltext_mapping")
     pdf_artifact = _pdf_artifact_identity(Path(pdf_path))
-    pdf_pages = _read_pdf_pages(Path(pdf_path), pdf_artifact)
+    pdf_pages, _pdf_text_layer_error = _try_read_pdf_pages(Path(pdf_path), pdf_artifact)
     document, grobid_metadata = _grobid_extract_pdf(Path(pdf_path))
     if not isinstance(document.get("metadata"), dict):
         document["metadata"] = {}

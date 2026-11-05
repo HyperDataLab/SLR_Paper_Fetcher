@@ -54,6 +54,8 @@ services:
     image: grobid/grobid:0.9.1-crf
     platform: linux/amd64
     restart: unless-stopped
+    ports:
+      - "127.0.0.1:8070:8070"
 
   ollama:
     image: ollama/ollama

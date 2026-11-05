@@ -62,17 +62,19 @@
       this.logs = [];
       this.optional = { stance: 'optional', saffron: 'optional' };
       this.profileState = 'checking';
-      this.root = document.getElementById('draftViewArea');
+      this.root = document.getElementById('draftViewArea') || document.getElementById('processingRoot');
       this.activeModuleId = null;
       this.handoffAnimation = null;
       this.droneAnimation = null;
       this.introAnimations = [];
     }
 
-    async start(paper, { onViewResults, demo = false } = {}) {
+    async start(paper, { onViewResults, demo = false, autoNavigateToResults = false } = {}) {
       this.paper = { ...paper };
       if (this.onStart) this.onStart(this.paper);
       this.onViewResults = onViewResults || null;
+      this.autoNavigateToResults = Boolean(autoNavigateToResults);
+      this.resultsTransitionStarted = false;
       this.demo = Boolean(demo);
       this.demoStages = this.paper.source_kind === 'markdown' ? DEMO_STAGES.filter(stage => !['fulltext_mapping','fulltext_mapping_created'].includes(stage)) : DEMO_STAGES;
       clearTimeout(this.demoTimer);
@@ -93,6 +95,7 @@
       this.render();
       const introWorkspace = this.workspace;
       const introPromise = this.playIntro();
+      this.introPromise = introPromise;
       if (this.demo) {
         this.refs.consoleMeta.textContent = 'DEMO | local stage simulation | no analysis request';
         introPromise.then(() => {
@@ -101,7 +104,8 @@
         return;
       }
       if (this.status === 'DONE') {
-        await this.loadCompletedArtifacts();
+        if (this.autoNavigateToResults) await this.finishToResults();
+        else await this.loadCompletedArtifacts();
       } else if (this.status === 'PENDING' || this.status === 'PROCESSING') {
         this.schedulePoll(0);
       }
@@ -656,7 +660,8 @@
       if (this.status === 'DONE') {
         this.stopped = true;
         clearTimeout(this.pollTimer);
-        void this.loadCompletedArtifacts();
+        if (this.autoNavigateToResults) void this.finishToResults();
+        else void this.loadCompletedArtifacts();
       } else if (this.status === 'FAILED') {
         this.stopped = true;
         clearTimeout(this.pollTimer);
@@ -726,6 +731,13 @@
         } else this.optional.saffron = 'unavailable';
       } catch { this.optional.saffron = 'unavailable'; }
       this.render();
+    }
+    async finishToResults() {
+      if (!this.autoNavigateToResults || this.resultsTransitionStarted) return;
+      this.resultsTransitionStarted = true;
+      await this.introPromise;
+      if (!this.workspace) return;
+      await this.viewResults();
     }
     async viewResults() {
       this.stopped = true;

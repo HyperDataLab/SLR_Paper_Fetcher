@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Processing paper analysis | SLR Paper Fetcher</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', path='css/analysis-processing.css') }}">
+  <script src="{{ url_for('static', path='js/analysis-processing.js') }}"></script>
+  <style>
+    body.paper-processing-route { height: 100vh; min-height: 0; margin: 0; overflow: hidden; background: #f7f9fa; font-family: Inter,system-ui,sans-serif; }
+    #processingRoot { width: 100%; height: 100%; min-height: 0; }
+    .processing-route-loading { display: grid; height: 100%; place-content: center; color: #607486; font-size: 13px; }
+    .processing-route-error { display: grid; min-height: 100%; place-content: center; gap: 12px; padding: 24px; color: #294252; text-align: center; }
+    .processing-route-error a { color: #075985; font-weight: 600; }
+    @media (max-width: 760px) { body.paper-processing-route { height: 100dvh; overflow: auto; } #processingRoot { height: auto; min-height: 100%; } }
+  </style>
+</head>
+<body class="paper-processing-route" data-paper-id="{{ paper_id }}">
+  <main id="processingRoot" aria-live="polite"><p class="processing-route-loading">Preparing the paper processing workspace…</p></main>
+  <script>
+    (() => {
+      const root = document.getElementById('processingRoot');
+      const doi = document.body.dataset.paperId;
+      const params = new URLSearchParams(location.search);
+      const demo = params.get('demo') === '1';
+      const resultUrl = `/analysis/paper/${encodeURIComponent(doi)}?from=${encodeURIComponent('/analysis')}`;
+      const showError = message => {
+        const box = document.createElement('section');
+        box.className = 'processing-route-error';
+        const text = document.createElement('p');
+        text.textContent = message;
+        const back = document.createElement('a');
+        back.href = '/analysis';
+        back.textContent = 'Back to papers';
+        box.append(text, back);
+        root.replaceChildren(box);
+      };
+      (async () => {
+        const response = await fetch('/api/analysis/papers', { cache: 'no-store' });
+        if (!response.ok) throw new Error(`Could not load paper status (HTTP ${response.status}).`);
+        const data = await response.json();
+        const paper = (data.papers || []).find(item => item.doi === doi);
+        if (!paper) throw new Error('This paper is no longer available in the analysis library.');
+        if (!demo && paper.analysis_status === 'DONE') {
+          location.replace(resultUrl);
+          return;
+        }
+        const experience = new window.AnalysisProcessingExperience();
+        root.replaceChildren();
+        experience.start(paper, {
+          demo,
+          autoNavigateToResults: !demo,
+          onViewResults: () => location.replace(resultUrl),
+        });
+      })().catch(error => showError(error.message || 'Could not open the processing workspace.'));
+    })();
+  </script>
+</body>
+</html>

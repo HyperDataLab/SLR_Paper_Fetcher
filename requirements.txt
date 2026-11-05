@@ -12,4 +12,6 @@ beautifulsoup4
 playwright
 lxml
 pypdf
+pypdfium2
+Pillow
 xlrd

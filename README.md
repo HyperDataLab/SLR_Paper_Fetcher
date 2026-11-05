@@ -13,7 +13,7 @@
   </p>
 </div>
 
-SLR Paper Fetcher nhận DOI, tải các bản PDF có thể truy cập, quản lý thư viện bài báo và tạo bản phân tích có thể truy ngược về văn bản nguồn. Ứng dụng kết hợp **GROBID** để trích xuất toàn văn với **Ollama** chạy cục bộ hoặc **Gemini API** để hỗ trợ phân tích.
+SLR Paper Fetcher nhận DOI, tải các bản PDF có thể truy cập, quản lý thư viện bài báo và tạo bản phân tích có thể truy ngược về văn bản nguồn. Ứng dụng gửi từng trang PDF tới **Ollama Vision API** để tạo Markdown, dùng **GROBID** để lấy metadata/citations, rồi dùng **Ollama API** hoặc **Gemini API** cho bước phân tích Markdown.
 
 > [!IMPORTANT]
 > Kết quả AI là bản nháp phục vụ rà soát. Người nghiên cứu cần kiểm tra trích dẫn và nội dung nguồn; cấu trúc lập luận không tự chứng minh tính đúng đắn khoa học.
@@ -38,7 +38,7 @@ SLR Paper Fetcher nhận DOI, tải các bản PDF có thể truy cập, quản 
 | 🔎 | **Tìm và tải bài báo** | Nhận DOI đơn lẻ, danh sách DOI, CSV hoặc Excel; thử các nguồn truy cập mở và VNU/OpenAthens đã cấu hình. |
 | 📚 | **Thư viện PDF** | Theo dõi trạng thái tải, quản lý tệp và xuất trích dẫn RIS. |
 | ☁️ | **Đồng bộ SLR System** | Chọn dự án đích và gửi bài báo đã lưu qua API. |
-| 🧠 | **Phân tích toàn văn** | Trích xuất nội dung bằng GROBID; phân tích bằng Ollama cục bộ hoặc Gemini API. |
+| 🧠 | **Phân tích toàn văn** | Ollama Vision API chuyển PDF thành Markdown; GROBID bổ sung metadata/citations; Ollama API hoặc Gemini API phân tích Markdown. |
 | 🕸️ | **Rà soát lập luận** | Xem trích dẫn nguồn, mô hình 5 phần The Craft of Research, Toulmin Model và AIF Graph; rà soát các đề xuất AI. |
 | 💾 | **Tiếp tục công việc** | Lưu bản phân tích, lịch sử và trạng thái hàng đợi trong SQLite. |
 
@@ -49,15 +49,18 @@ SLR Paper Fetcher nhận DOI, tải các bản PDF có thể truy cập, quản 
 flowchart LR
     R[👩‍🔬 Nhà nghiên cứu] --> A[SLR Paper Fetcher]
     A --> S[🔎 Nguồn bài báo]
-    A --> G[GROBID<br/>Trích xuất toàn văn]
-    G --> F[Full-text mapping JSON<br/>Sections + offsets + pages]
-    F --> O[Ollama<br/>AI cục bộ]
-    F -. tùy chọn .-> M[Gemini API]
+    A --> P[Render trang PDF<br/>PyMuPDF]
+    A --> H[GROBID<br/>Metadata và citations]
+    P --> O[Ollama Vision API<br/>PDF → Markdown]
+    O --> F[Full-text mapping JSON<br/>Sections + offsets + pages]
+    F --> I[Ollama API hoặc Gemini API<br/>Phân tích Markdown]
     A --> D[(SQLite và PDF)]
     A --> V[VNU / OpenAthens<br/>Tùy cấu hình]
 ```
 
-Trước khi gọi AI, GROBID tạo file `<tên-PDF>.fulltext.json` cạnh PDF. Pipeline đọc lại file này, kiểm tra toàn bộ section, offsets và độ dài văn bản; nếu GROBID chỉ trả về văn bản một phần hoặc mapping không hợp lệ thì dừng phân tích. Các section được chia thành chunk nhưng gửi đủ toàn văn; bản nháp được tổng hợp sau khi xử lý hết chunk.
+PDF được render từng trang bằng pypdfium2 rồi gửi qua Ollama Vision API để chuyển thành Markdown; app không tải hoặc chạy model AI extract cục bộ. Mặc định dùng model vision `minimax-m3:cloud`, cấu hình riêng bằng `PDF_EXTRACTION_OLLAMA_MODEL`; ảnh trang được gửi tới Ollama URL đang cấu hình. GROBID tiếp tục cung cấp metadata và citations. Markdown được lưu thành `<tên-PDF>.ollama.md`, còn mapping có offsets và page markers lưu thành `<tên-PDF>.fulltext.json`. Độ phủ từ vựng so với text layer PDF chỉ là tín hiệu phát hiện trang đáng nghi, không chứng minh OCR hoặc bố cục đúng hoàn toàn; trang OCR hoặc độ phủ thấp cần được đối chiếu với PDF. Phân tích Markdown ở các bước sau tiếp tục dùng provider/model đã chọn riêng trong Settings.
+
+Ở các bước sau, nội dung Markdown được chia thành các chunk có giới hạn kích thước để gửi lần lượt qua provider phân tích. Trước khi gọi AI, ứng dụng xác nhận ghép các chunk khôi phục chính xác toàn văn theo đúng thứ tự; nếu thiếu hoặc lặp ký tự thì dừng lượt phân tích. Review toàn văn, trích xuất mệnh đề, Paper Profile và Stance & Engagement đều gửi toàn bộ chunk nội dung được áp dụng cho bước đó. Tab **Stance & Engagement** hiển thị số ký tự/chunk đã gửi và hoàn tất. Coverage này xác nhận đầu vào được chuyển tới provider, không đảm bảo việc OCR đã đúng PDF hoặc model diễn giải mọi chi tiết chính xác; cần đối chiếu trang có cảnh báo với PDF.
 
 <a id="docker"></a>
 ## 🐳 Cài và chạy bằng Docker
@@ -172,7 +175,7 @@ Mở **[http://127.0.0.1:8543](http://127.0.0.1:8543)**. GROBID và Ollama là c
 
 | Provider | Cần chuẩn bị | Cách bật |
 |---|---|---|
-| 🖥️ **Ollama** | Dịch vụ Ollama và model đã tải | Chọn Ollama trong **Settings**; Docker Compose dùng `qwen2.5:7b` mặc định. |
+| 🖥️ **Ollama API** | Ollama URL truy cập được và model đã chọn | Chọn Ollama trong **Settings**. Model phân tích Markdown và model vision extract PDF được cấu hình riêng. |
 | ☁️ **Gemini API** | Gemini API key | Chọn Gemini trong **Settings** và nhập key. |
 
 <a id="configuration"></a>
@@ -186,6 +189,7 @@ Mở **[http://127.0.0.1:8543](http://127.0.0.1:8543)**. GROBID và Ollama là c
 | `AI_DEFAULT_PROVIDER` | `ollama` | Provider phân tích mặc định. |
 | `OLLAMA_URL` | `http://127.0.0.1:11434` native | Địa chỉ dịch vụ Ollama. |
 | `OLLAMA_MODEL` | `qwen2.5:7b` | Tên model Ollama. |
+| `PDF_EXTRACTION_OLLAMA_MODEL` | `minimax-m3:cloud` | Model vision dùng riêng cho PDF → Markdown qua Ollama API. |
 | `GEMINI_API_KEY` | Trống | Gemini key; có thể nhập trong **Settings**. |
 | `GEMINI_MODEL` | `gemini-2.5-flash` | Tên model Gemini. |
 | `APP_HOST`, `APP_PORT` | `127.0.0.1`, `8543` | Host và cổng khi chạy native. |
@@ -198,7 +202,7 @@ Mở **[http://127.0.0.1:8543](http://127.0.0.1:8543)**. GROBID và Ollama là c
 | `SAFFRON_TAXONOMY_MODEL_PATH` | `/opt/saffron/models/default.json` | Vị trí file SVM taxonomy đã train bên trong container SAFFRON; file này phải có trong volume `saffron-models`. |
 | `SAFFRON_AUTO_START` | `true` | Ở chế độ chạy native, tự gọi Docker Compose để bật service nếu chưa sẵn sàng. |
 
-Trong Docker Compose, web app truy cập GROBID tại `http://grobid:8070` và Ollama tại `http://ollama:11434`. Các giá trị AI trong **Settings** được lưu trong volume `app-data` và giữ nguyên sau khi container khởi động lại.
+Trong Docker Compose, web app truy cập GROBID tại `http://grobid:8070` và Ollama tại `http://ollama:11434` theo mặc định. Các giá trị AI trong **Settings** được lưu trong volume `app-data` và giữ nguyên sau khi container khởi động lại. Model extract PDF cũng có thể đổi trong **Settings** mà không đổi model phân tích Markdown.
 
 Để kết nối SLR System, dùng nút **Cấu hình API** trong ứng dụng. Backend phải truy cập được từ container; trên Docker Desktop, địa chỉ host thường dùng `http://host.docker.internal:<port>`.
 
